@@ -76,6 +76,7 @@ If you add a track from your computer's "Downloads" or "Desktop" folder, the scr
 *   **Avoid "Rescan on Startup":** In Mixxx preferences, keep "Rescan on Startup" **OFF**. Let the Python script finish its "surgery" before Mixxx starts looking for files.
 *   **Duplicate Tracks:** If duplicates appear, go to `Library -> Clean up Library`. This usually means you added music from a folder outside the `Music/` anchor.
 *   **Analysis Lost:** This happens if you open Mixxx directly without using the "Smart Launcher." **Always use the `.bat` or `.sh` files.**
+*   **startup issues** On Linux it can be a Problem if you install Mixxx via the Softwaremanager or Flatpack, try installing it via the packet Manager by running `sudo apt install mixxx` or equivalent on your machine.
 
 ---
 
@@ -83,3 +84,4 @@ If you add a track from your computer's "Downloads" or "Desktop" folder, the scr
 This project is licensed under the **GPL-3.0**. 
 
 > 🐬 *Trust me, I'm a dolphin. Your database is in safe fins.*
+
