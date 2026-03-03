@@ -1,7 +1,3 @@
-This is a comprehensive documentation for your project, which we can call **Mixxx-Anywhere: Cross-Platform Portable Library Sync**.
-
----
-
 # Mixxx-Anywhere: Portable Library Sync
 A robust solution for running a **Mixxx** DJ setup from a portable drive (USB/SSD) or a synced cloud folder (Dropbox/OneDrive) across both **Linux** and **Windows** without losing track analysis, cues, or playlists.
 
@@ -141,4 +137,5 @@ When you move to the other OS (e.g., from Windows to Linux):
 *   **Avoid "Rescan on Startup":** It is still better to trigger the scan manually once Mixxx is open. This ensures the Python script has finished its "surgery" on the existing database entries before Mixxx starts looking for new ones.
 
 ### Pro-Tip:
+
 If you have a lot of new music, you can analyze it (BPM/Key/Beatgrid) on one machine (e.g., your powerful Windows PC), and thanks to the script, all that analysis data will be perfectly preserved when you open that same drive on your Linux laptop later!
