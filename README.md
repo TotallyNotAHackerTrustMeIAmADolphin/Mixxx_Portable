@@ -2,7 +2,7 @@
 A robust solution for running a **Mixxx** DJ setup from a portable drive (USB/SSD) or a synced cloud folder (Dropbox/OneDrive) across both **Linux** and **Windows** without losing track analysis, cues, or playlists.
 
 ## 1. The Problem
-Mixxx stores all track locations, metadata (BPM, Key), and configuration settings using **absolute paths** (e.g., `C:\Users\Bashi\Music\...` or `/home/bashi/Music/...`).
+Mixxx stores all track locations, metadata (BPM, Key), and configuration settings using **absolute paths** (e.g., `C:\Users\User\Music\...` or `/home/User/Music/...`).
 
 When you move your library between a Linux machine and a Windows machine, or even between two Windows machines with different drive letters:
 1. Mixxx marks all tracks as "Missing."
@@ -139,3 +139,4 @@ When you move to the other OS (e.g., from Windows to Linux):
 ### Pro-Tip:
 
 If you have a lot of new music, you can analyze it (BPM/Key/Beatgrid) on one machine (e.g., your powerful Windows PC), and thanks to the script, all that analysis data will be perfectly preserved when you open that same drive on your Linux laptop later!
+
