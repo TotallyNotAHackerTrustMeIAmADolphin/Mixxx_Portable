@@ -84,8 +84,8 @@ A minimal, embeddable version of Python for Windows. This allows the script to r
 
 ### Setup
 1.  **Mixxx:** Install Mixxx normally on your machines.
-2.  **Windows Python:** Download the "Windows Embeddable Package" from Python.org, extract it to `Mixxx_Data/python_win/`, and uncomment `import site` in the `python312._pth` file.
-3.  **Initial Move:** Move your music into the `Music/` folder and your existing Mixxx settings (from `/AppData/Local/mixxx` or `~/.mixxx`) into `Mixxx_Data/`.
+2.  **Clone Repo** Clone the Repository to your shared drive.
+3.  **Initial Move:** Move your music into the `Music/` folder and your existing Mixxx settings (from `/AppData/Local/mixxx` or `~/.mixxx`) into `Mixxx_Data/`. Or Mixxx will generate new ones at the first start.
 
 ### Daily Use
 *   **On Windows:** Double-click `start_smart_win.bat`.
@@ -139,4 +139,5 @@ When you move to the other OS (e.g., from Windows to Linux):
 ### Pro-Tip:
 
 If you have a lot of new music, you can analyze it (BPM/Key/Beatgrid) on one machine (e.g., your powerful Windows PC), and thanks to the script, all that analysis data will be perfectly preserved when you open that same drive on your Linux laptop later!
+
 
