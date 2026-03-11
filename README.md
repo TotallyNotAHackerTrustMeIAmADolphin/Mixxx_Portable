@@ -1,5 +1,3 @@
-***
-
 # 🎧 Mixxx-Anywhere: Portable Library Sync
 A robust solution for running a **Mixxx** DJ setup from a portable drive (USB/SSD) or a synced cloud folder (Dropbox/OneDrive) across both **Linux** and **Windows** without losing track analysis, cues, or playlists.
 
@@ -17,7 +15,7 @@ When you move between Windows and Linux, or change drive letters:
 ### The Solution
 This project uses a **"Smart Launcher"** system. Before Mixxx opens, a Python logic engine:
 *   **Detects** the current drive letter or mount point.
-*   **Backs up** your library safely before any modifications, keeping a self-cleaning, rolling history of your last 5 sessions per OS.
+*   **Backs up** your library safely before any modifications, keeping a self-cleaning, rolling history of your last 10 sessions per OS.
 *   **Restores** the correct config for your current OS (ASIO for Win / ALSA for Linux).
 *   **Rewrites** the SQLite database paths in real-time to match the current machine using strict, Mixxx-compliant formatting.
 *   **Cleans** "Ghost" entries to prevent duplicates.
@@ -131,3 +129,4 @@ If you add a track from your computer's "Downloads" or "Desktop" folder, the scr
 This project is licensed under the **GPL-3.0**. 
 
 > 🐬 *Trust me, I'm a dolphin. Your database is in safe fins.*
+
