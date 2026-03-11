@@ -4,6 +4,7 @@ import sys
 import shutil
 import datetime
 import glob
+import socket
 
 def mixxx_normalize_path(path_str):
     """Mixxx requires forward slashes and uppercase drive letters on all OSes."""
@@ -12,63 +13,71 @@ def mixxx_normalize_path(path_str):
         path_str = path_str[0].upper() + path_str[1:]
     return path_str
 
-def fix_paths(data_dir, to_os):
-    # 1. SETUP PATHS
+def fix_paths(data_dir, to_os, mode="load"):
+    # 1. SETUP PATHS & IDENTITY
     portable_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     db_path = os.path.join(data_dir, "mixxxdb.sqlite")
-    cfg_path = os.path.join(data_dir, "mixxx.cfg")
+    cfg_active = os.path.join(data_dir, "mixxx.cfg")
+    
+    # Subfolders
+    config_dir = os.path.join(data_dir, "Configs")
+    backup_dir = os.path.join(data_dir, "Backups")
+    os.makedirs(config_dir, exist_ok=True)
+    os.makedirs(backup_dir, exist_ok=True)
 
-    # Normalize our base directories immediately to Mixxx standards
+    hostname = socket.gethostname().lower()
     current_root = mixxx_normalize_path(portable_root)
     current_music_dir = current_root + "/Music"
     
-    # Clean up the OS name for filenames (e.g. "windows", "mac", "linux")
-    safe_os_name = to_os.lower().strip()
+    # Define storage paths for configs
+    machine_cfg_store = os.path.join(config_dir, f"mixxx.cfg.{hostname}")
+    os_template_store = os.path.join(config_dir, f"mixxx.cfg.{to_os[:3].lower()}") 
 
-    print(f"--- Mixxx Sync [{to_os.upper()}] ---")
-    print(f"Target Music Path: {current_music_dir}")
+    print(f"--- Mixxx Sync [{to_os.upper()} | Machine: {hostname}] ---")
 
-    # --- NEW: BACKUP & CLEANUP FEATURE (WITH OS NAMING) ---
+    # --- MODE: SAVE (Called after Mixxx closes) ---
+    if mode == "save":
+        if os.path.exists(cfg_active):
+            shutil.copy2(cfg_active, machine_cfg_store)
+            print(f"Hardware settings saved to: Configs/mixxx.cfg.{hostname}")
+        return
+
+    # --- MODE: LOAD (Called before Mixxx starts) ---
+    
+    # 1. Hardware Config Swap Logic (Load from Configs folder into root)
+    if os.path.exists(machine_cfg_store):
+        print(f"Found specific config for {hostname}. Restoring...")
+        shutil.copy2(machine_cfg_store, cfg_active)
+    elif os.path.exists(os_template_store):
+        print(f"No machine-specific config. Using {to_os} template...")
+        shutil.copy2(os_template_store, cfg_active)
+    else:
+        print("No backup config found. Using current mixxx.cfg if it exists.")
+
+    # 2. DATABASE BACKUP
     try:
-        MAX_BACKUPS = 10 # Change this number to keep more or fewer backups!
-        backup_dir = os.path.join(data_dir, "Backups")
-        os.makedirs(backup_dir, exist_ok=True) 
+        MAX_BACKUPS = 10 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # 1. Create the new backups with the OS in the filename
         if os.path.exists(db_path):
-            db_backup = os.path.join(backup_dir, f"mixxxdb_{safe_os_name}_{timestamp}.sqlite")
+            db_backup = os.path.join(backup_dir, f"mixxxdb_{hostname}_{timestamp}.sqlite")
             shutil.copy2(db_path, db_backup)
         
-        if os.path.exists(cfg_path):
-            cfg_backup = os.path.join(backup_dir, f"mixxx_{safe_os_name}_{timestamp}.cfg")
-            shutil.copy2(cfg_path, cfg_backup)
-            
-        print(f"Backup created successfully in: Backups/ (OS: {safe_os_name.upper()} | Timestamp: {timestamp})")
-
-        # 2. Clean up old backups to prevent overflow
-        db_backups = sorted(glob.glob(os.path.join(backup_dir, "mixxxdb_*.sqlite")))
+        # Cleanup old backups
+        db_backups = sorted(glob.glob(os.path.join(backup_dir, f"mixxxdb_{hostname}_*.sqlite")))
         if len(db_backups) > MAX_BACKUPS:
             for old_db in db_backups[:-MAX_BACKUPS]:
                 os.remove(old_db)
-
-        cfg_backups = sorted(glob.glob(os.path.join(backup_dir, "mixxx_*.cfg")))
-        if len(cfg_backups) > MAX_BACKUPS:
-            for old_cfg in cfg_backups[:-MAX_BACKUPS]:
-                os.remove(old_cfg)
-                
     except Exception as e:
-        print(f"Backup Error: {e} - Proceeding without backup...")
+        print(f"Backup Error: {e}")
 
-    # --- PART A: DATABASE FIX ---
+    # 3. DATABASE PATH RECONSTRUCTION
     if os.path.exists(db_path):
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         try:
-            print("Cleaning up database ghost entries...")
+            # Ghost cleanup (important to prevent duplicates when moving drives)
             cur.execute("DELETE FROM track_locations WHERE id IN (SELECT location FROM library WHERE mixxx_deleted = 1)")
             cur.execute("DELETE FROM library WHERE mixxx_deleted = 1")
-            cur.execute("DELETE FROM track_locations WHERE id NOT IN (SELECT location FROM library)")
             
             targets =[
                 ("track_locations", "location", "id"),
@@ -83,71 +92,59 @@ def fix_paths(data_dir, to_os):
                 if any(col == c[1] for c in cur.fetchall()):
                     cur.execute(f"SELECT {pkey}, {col} FROM {table} WHERE {col} LIKE '%Mixxx_Portable%'")
                     rows = cur.fetchall()
-                    
                     for pk, old_path in rows:
                         if not old_path: continue
-                        
                         clean_old = old_path.replace("\\", "/")
-                        
                         if "Mixxx_Portable/Music" in clean_old:
                             sub_path = clean_old.split("Mixxx_Portable/Music")[-1].lstrip("/")
-                            
-                            # CRITICAL FIX: String concatenation ensures we keep the forward slash!
                             new_path = f"{current_music_dir}/{sub_path}"
-                            
                             try:
                                 cur.execute(f"UPDATE {table} SET {col} = ? WHERE {pkey} = ?", (new_path, pk))
                             except sqlite3.IntegrityError:
+                                # This happens if the path already exists in the DB (prevent duplicates)
                                 cur.execute(f"DELETE FROM {table} WHERE {pkey} = ?", (pk,))
-
             conn.commit()
             print("Database: Path reconstruction complete.")
-        except Exception as e:
-            print(f"Database Error: {e}")
         finally:
             conn.close()
 
-    # --- PART B: CONFIG FILE FIX ---
-    if os.path.exists(cfg_path):
+    # 4. CONFIG FILE PATH RECONSTRUCTION (The Active mixxx.cfg in root)
+    if os.path.exists(cfg_active):
         try:
-            with open(cfg_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(cfg_active, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = f.readlines()
-
             new_lines =[]
-            in_library_section = False
-
+            in_lib = False
             for line in lines:
-                stripped = line.strip()
-                
-                if stripped == "[Library]":
-                    in_library_section = True
-                elif stripped.startswith("[") and stripped.endswith("]"):
-                    in_library_section = False
+                s = line.strip()
+                if s == "[Library]": in_lib = True
+                elif s.startswith("[") and s.endswith("]"): in_lib = False
 
-                if (in_library_section or stripped.startswith("Directory")) and stripped.startswith("Directory"):
+                if (in_lib or s.startswith("Directory")) and s.startswith("Directory"):
                     new_lines.append(f"Directory {current_music_dir}\n")
-                elif stripped.startswith("RecordingDirectory"):
+                elif s.startswith("RecordingDirectory"):
                     new_lines.append(f"RecordingDirectory {current_music_dir}\n")
                 elif "Mixxx_Portable" in line:
                     key = line.split(" ")[0]
                     clean_line = line.replace("\\", "/")
                     if "Mixxx_Portable/" in clean_line:
                         sub_path = clean_line.split("Mixxx_Portable/")[-1].strip()
-                        new_val = f"{current_root}/{sub_path}"
-                        new_lines.append(f"{key} {new_val}\n")
+                        new_lines.append(f"{key} {current_root}/{sub_path}\n")
                     else:
-                        new_lines.append(line) # Leave standard lines alone
+                        new_lines.append(line)
                 else:
                     new_lines.append(line)
-
-            with open(cfg_path, 'w', encoding='utf-8') as f:
+            with open(cfg_active, 'w', encoding='utf-8') as f:
                 f.writelines(new_lines)
             print("Config: Path reconstruction complete.")
         except Exception as e:
             print(f"Config Error: {e}")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2:
-        fix_paths(sys.argv[1], sys.argv[2])
+    if len(sys.argv) >= 3:
+        d_dir = sys.argv[1]
+        o_type = sys.argv[2]
+        mode_flag = sys.argv[3] if len(sys.argv) > 3 else "load"
+        fix_paths(d_dir, o_type, mode_flag)
     else:
-        print("Usage: python helper.py <data_dir> <os_type>")
+        print("Usage: python helper.py <data_dir> <os_type> <load/save>")

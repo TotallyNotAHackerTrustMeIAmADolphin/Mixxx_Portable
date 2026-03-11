@@ -1,24 +1,21 @@
-# 🎧 Mixxx-Anywhere: Portable Library Sync
-A robust solution for running a **Mixxx** DJ setup from a portable drive (USB/SSD) or a synced cloud folder (Dropbox/OneDrive) across both **Linux** and **Windows** without losing track analysis, cues, or playlists.
+# 🎧 Mixxx-Anywhere: Portable & Machine-Aware Sync
+
+A robust solution for running a **Mixxx** DJ setup from a portable drive (USB/SSD) or a synced cloud folder (Dropbox/OneDrive) across multiple computers and operating systems (**Windows & Linux**) without losing track analysis, cues, playlists, or audio hardware settings.
 
 ---
 
 ## 🛠 The Problem vs. The Solution
 
 ### The Problem
-Mixxx stores all track locations and metadata (BPM, Cues) using **absolute paths** (e.g., `C:\Users\Name\Music\...`). 
-When you move between Windows and Linux, or change drive letters:
-1. Mixxx marks tracks as "Missing."
-2. Rescanning creates duplicates and loses your analysis data.
-3. Audio hardware settings for Linux often crash on Windows, and vice versa.
+1.  **Paths:** Mixxx uses absolute paths (e.g., `C:\Users\Name\Music\...`). Move to another computer or Linux, and your library "breaks."
+2.  **Hardware:** Every computer has different soundcards and latency capabilities. A Windows ASIO config will crash a Linux machine, and a Laptop’s buffer settings will likely be too high/low for a Studio PC.
 
 ### The Solution
-This project uses a **"Smart Launcher"** system. Before Mixxx opens, a Python logic engine:
-*   **Detects** the current drive letter or mount point.
-*   **Backs up** your library safely before any modifications, keeping a self-cleaning, rolling history of your last 10 sessions per OS.
-*   **Restores** the correct config for your current OS (ASIO for Win / ALSA for Linux).
-*   **Rewrites** the SQLite database paths in real-time to match the current machine using strict, Mixxx-compliant formatting.
-*   **Cleans** "Ghost" entries to prevent duplicates.
+The **Smart Launcher** handles the "surgery" before Mixxx starts:
+*   **Machine-Specific Hardware:** It detects the unique **Hostname** of the computer and loads/saves a dedicated hardware config for *that specific machine*.
+*   **Path Reconstruction:** It rewrites the SQLite database in real-time to match the current drive letter or mount point.
+*   **Rolling Backups:** It maintains a self-cleaning history of your database, tagged by machine name and timestamp.
+*   **The Anchor System:** By keeping all music in a relative `/Music` folder, it ensures 100% portability.
 
 ---
 
@@ -29,12 +26,16 @@ This project uses a **"Smart Launcher"** system. Before Mixxx opens, a Python lo
 ├── start_smart_lin.sh    # Linux Entry Point
 ├── Music/                # THE ANCHOR: Put all your audio files here
 ├── Mixxx_Data/           # Your settingsPath folder
-│   ├── mixxxdb.sqlite    # The Library Database
-│   ├── mixxx.cfg         # Active config
-│   ├── mixxx.cfg.win     # Windows-specific hardware backup
-│   ├── mixxx.cfg.lin     # Linux-specific hardware backup
-│   └── Backups/          # Auto-generated rolling backups (e.g., mixxxdb_windows_20260311_181500.sqlite)
-└── Scripts/              # logic and path-fixing scripts
+│   ├── mixxxdb.sqlite    # The ACTIVE Library Database
+│   ├── mixxx.cfg         # The ACTIVE config (overwritten on launch)
+│   ├── Configs/          # Machine-specific hardware settings
+│   │   ├── mixxx.cfg.win      # Windows Generic Template
+│   │   ├── mixxx.cfg.lin      # Linux Generic Template
+│   │   ├── mixxx.cfg.dj-lap   # Specific settings for "DJ-LAP"
+│   │   └── mixxx.cfg.studio   # Specific settings for "STUDIO"
+│   └── Backups/          # Rolling DB backups (e.g., mixxxdb_dj-lap_20240311.sqlite)
+└── Scripts/              
+    └── mixxx_path_fixer.py   # The logic engine
 ```
 
 ---
@@ -42,23 +43,25 @@ This project uses a **"Smart Launcher"** system. Before Mixxx opens, a Python lo
 ## 🚀 Setup Guide
 
 ### 1. Initial Preparation
-1.  **Install Mixxx** normally on both your Windows and Linux machines.
-2.  **Clone this repo** to your portable drive or cloud folder.
-3.  **Move your Music:** Place all your tracks inside the `/Music` folder of this repo.
-4.  **Move your Settings:(optional)** Copy your existing Mixxx data (from `AppData/Local/mixxx` or `~/.mixxx`) into the `Mixxx_Data/` folder.
-5.  **Initial start:** On the first run of the launcher, select the `Music` folder as your library directory.
+1.  **Install Mixxx** on your machines (Windows/Linux).
+2.  **Copy this Repository** to your portable drive or cloud folder.
+3.  **Move your Music:** Place all your tracks inside the `/Music` folder.
+4.  **Move existing data (Optional):** If you have an existing library, copy `mixxxdb.sqlite` into `Mixxx_Data/`.
 
-### 2. Making it Work
-*   **On Linux:** Run `chmod +x start_smart_lin.sh` to allow the script to execute.
-*   **On Windows:** Ensure you have Python installed (the script will look for `python`). *Note: If using an embedded Python setup, ensure `sqlite3.dll` and `_sqlite3.pyd` are included!*
+### 2. The First Run
+1.  Launch the script for your OS (`.bat` or `.sh`).
+2.  Mixxx will open with a "blank" or "default" hardware config.
+3.  **Configure your Hardware:** Go to Preferences -> Sound Hardware. Set up your Soundcard, Latency, and Controllers.
+4.  **Set Music Folder:** When Mixxx asks, point the library to the `/Music` folder inside this portable directory.
+5.  **Close Mixxx:** The script will automatically detect your computer's name and save your settings into `Mixxx_Data/Configs/mixxx.cfg.[your-hostname]`.
 
 ---
 
-## 🎵 The "Golden Rule" for Music
+## 🎵 The "Golden Rule"
 To ensure sync works, you **must** follow this rule:
 > **All music files must stay inside the `/Music` folder on your portable drive.**
 
-If you add a track from your computer's "Downloads" or "Desktop" folder, the script cannot "fix" it. When you switch to another computer, that track will be missing. Always move files into the portable `/Music` folder **before** scanning them in Mixxx.
+If you add a track from a computer's local "Downloads" or "Desktop" folder, the script cannot "fix" it. When you switch to another computer, that track will be missing. 
 
 ---
 
@@ -66,23 +69,23 @@ If you add a track from your computer's "Downloads" or "Desktop" folder, the scr
 
 1.  **Plug in** your drive.
 2.  **Launch** via `start_smart_win.bat` or `start_smart_lin.sh`.
-3.  **The Script** will automatically:
-    *   Create a timestamped, OS-tagged backup (deleting old ones so your drive doesn't overflow).
-    *   Swap your OS-specific sound settings.
-    *   Fix all file paths in the database.
-4.  **Inside Mixxx:** If you added new music, right-click "Tracks" and select **Rescan Library**.
-5.  **Close Mixxx:** The launcher will automatically save your session's settings back to the correct OS backup file (`.win` or `.lin`).
+3.  **The Script will:**
+    *   Create a timestamped backup in `/Backups`.
+    *   Identify your machine and swap in your saved hardware config from `/Configs`.
+    *   Fix all file paths in the database to match the current drive.
+4.  **DJ Session:** Play, analyze tracks, and create playlists as usual.
+5.  **Close Mixxx:** The launcher will save any hardware changes (new MIDI maps, latency tweaks) back to your machine-specific config file.
 
 ---
 
-## ⚠️ Important Rules & Troubleshooting
+## ⚠️ Important Rules
 
-*   **Avoid "Rescan on Startup":** In Mixxx preferences, keep "Rescan on Startup" **OFF**. Let the Python script finish its "surgery" before Mixxx starts looking for files.
-*   **Duplicate Tracks:** If duplicates appear, go to `Library -> Clean up Library`. This usually means you added music from a folder outside the `Music/` anchor.
-*   **Analysis Lost:** This happens if you open Mixxx directly without using the "Smart Launcher." **Always use the `.bat` or `.sh` files.**
-*   **Startup issues:** On Linux, it can be a problem if you install Mixxx via the Software Manager or Flatpak. Try installing it via the package manager by running `sudo apt install mixxx` or equivalent on your machine.
+*   **Rescan on Startup:** Keep "Rescan on Startup" **OFF** in Mixxx preferences. Let the script finish its work before Mixxx scans. If you added new music, use **Right Click Tracks -> Rescan Library**.
+*   **Closing Mixxx:** Always let the terminal window (the script) finish its "Saving" process after you close Mixxx before unplugging your drive.
+*   **Linux Permissions:** On Linux, ensure the script is executable: `chmod +x start_smart_lin.sh`.
 
 ---
+
 ## Future Plans & Work in Progress
 
 ### 🛡️ Improvement Suggestions (Stability & Safety)
