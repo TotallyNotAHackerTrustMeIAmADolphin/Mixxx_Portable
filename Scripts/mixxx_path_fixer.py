@@ -14,7 +14,7 @@ def mixxx_normalize_path(path_str):
     return path_str
 
 def robust_open(file_path, mode, encoding='utf-8', retries=5, delay=0.2):
-    """Try to open a file multiple times to bypass cloud-sync (Dropbox) locks."""
+    """Try to open a file multiple times to bypass cloud-sync locks."""
     for i in range(retries):
         try:
             return open(file_path, mode, encoding=encoding, errors='ignore')
@@ -36,12 +36,13 @@ def check_db_lock(db_path):
         if choice != 'y':
             sys.exit(1)
 
-def validate_library(db_path):
+def validate_library(db_path, current_root):
     if not os.path.exists(db_path): return
     try:
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         cur = conn.cursor()
-        cur.execute("SELECT location FROM track_locations WHERE location NOT LIKE '%Mixxx_Portable%'")
+        # Find any tracks in the database that DO NOT start with the exact current portable root
+        cur.execute("SELECT location FROM track_locations WHERE location NOT LIKE ?", (f"{current_root}%",))
         external_tracks = cur.fetchall()
         if external_tracks:
             print("\n" + "!"*60)
@@ -54,13 +55,15 @@ def validate_library(db_path):
     except Exception: pass
 
 def fix_paths(data_dir, to_os, mode="load"):
-    # Normalize path strings to prevent Windows 'Invalid Argument' errors
     data_dir = os.path.abspath(data_dir)
     portable_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     db_path = os.path.join(data_dir, "mixxxdb.sqlite")
     cfg_active = os.path.join(data_dir, "mixxx.cfg")
     config_dir = os.path.join(data_dir, "Configs")
     backup_dir = os.path.join(data_dir, "Backups")
+    db_state_file = os.path.join(data_dir, ".portable_root") # NEW: Remembers the previous folder path
+    
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(backup_dir, exist_ok=True)
 
@@ -72,7 +75,7 @@ def fix_paths(data_dir, to_os, mode="load"):
     machine_cfg_store = os.path.join(config_dir, f"mixxx.cfg.{hostname}")
     os_template_store = os.path.join(config_dir, f"mixxx.cfg.{os_ext}") 
 
-    print(f"--- Mixxx Sync [{to_os.upper()} | Machine: {hostname}] ---")
+    print(f"--- Mixxx Sync[{to_os.upper()} | Machine: {hostname}] ---")
 
     if mode == "save":
         if os.path.exists(cfg_active):
@@ -103,11 +106,19 @@ def fix_paths(data_dir, to_os, mode="load"):
             for old_db in db_backups[:-MAX_BACKUPS]: os.remove(old_db)
     except Exception as e: print(f"Backup Error: {e}")
 
+    # Determine the old root path for dynamic substitution
+    if os.path.exists(db_state_file):
+        with open(db_state_file, "r") as f:
+            old_root = f.read().strip()
+    else:
+        # Fallback for users migrating from the previous script version
+        old_root = "Mixxx_Portable"
+
     # Path Reconstruction
     total_updated = 0
     if os.path.exists(db_path):
         try:
-            conn = sqlite3.connect(db_path)
+            conn = sqlite3.connect(db_path, timeout=15.0)
             cur = conn.cursor()
             cur.execute("DELETE FROM track_locations WHERE id IN (SELECT location FROM library WHERE mixxx_deleted = 1)")
             cur.execute("DELETE FROM library WHERE mixxx_deleted = 1")
@@ -116,68 +127,85 @@ def fix_paths(data_dir, to_os, mode="load"):
                 ("track_locations", "location", "id"), ("track_locations", "directory", "id"),
                 ("library", "location", "id"), ("library", "folder", "id"),
                 ("LibraryHashes", "directory_path", "directory_path"),
-                # --> NEW FIX: Add the 'directories' table which Mixxx uses for the Library root path
                 ("directories", "directory", "directory")
             ]
+
+            # Determine if we are matching an exact absolute path or just a substring (fallback)
+            is_absolute = ("/" in old_root or ":" in old_root)
+            search_like = f"{old_root}%" if is_absolute else f"%{old_root}%"
 
             for table, col, pkey in targets:
                 cur.execute(f"PRAGMA table_info({table})")
                 if any(col == c[1] for c in cur.fetchall()):
-                    cur.execute(f"SELECT {pkey}, {col} FROM {table} WHERE {col} LIKE '%Mixxx_Portable%'")
+                    cur.execute(f"SELECT {pkey}, {col} FROM {table} WHERE {col} LIKE ?", (search_like,))
                     rows = cur.fetchall()
+                    
+                    updates =[]
                     for pk, old_path in rows:
                         if not old_path: continue
                         clean_old = old_path.replace("\\", "/")
-                        if "Mixxx_Portable/Music" in clean_old:
-                            sub_path = clean_old.split("Mixxx_Portable/Music")[-1].lstrip("/")
-                            # --> NEW FIX: Using rstrip("/") ensures the root library path never gets a trailing slash appended
-                            new_path = f"{current_music_dir}/{sub_path}".rstrip("/")
-                            if clean_old != new_path:
-                                cur.execute(f"UPDATE {table} SET {col} = ? WHERE {pkey} = ?", (new_path, pk))
-                                total_updated += 1
+                        
+                        new_path = None
+                        if is_absolute:
+                            if clean_old.startswith(old_root):
+                                new_path = current_root + clean_old[len(old_root):]
+                        else:
+                            if f"{old_root}/" in clean_old:
+                                sub_path = clean_old.split(f"{old_root}/")[-1].lstrip("/")
+                                new_path = f"{current_root}/{sub_path}".rstrip("/")
+                                
+                        if new_path and clean_old != new_path:
+                            updates.append((new_path, pk))
+                    
+                    if updates:
+                        cur.executemany(f"UPDATE {table} SET {col} = ? WHERE {pkey} = ?", updates)
+                        total_updated += len(updates)
+                        
             conn.commit()
             conn.close()
             print(f"[SUCCESS] Database: Updated {total_updated} file path entries.")
         except Exception as e: print(f"Database Error: {e}")
 
-    # Config File Reconstruction (Using Robust Open)
+    # Config File Reconstruction
     if os.path.exists(cfg_active):
         try:
             with robust_open(cfg_active, 'r') as f:
                 lines = f.readlines()
             
-            new_lines =[]; cfg_fixes = 0
-            in_lib = False
+            new_lines =[]
+            cfg_fixes = 0
             for line in lines:
-                s = line.strip()
-                if s == "[Library]": in_lib = True
-                elif s.startswith("[") and s.endswith("]"): in_lib = False
-
-                if (in_lib or s.startswith("Directory")) and s.startswith("Directory"):
-                    new_val = f"Directory {current_music_dir}\n"
-                    if line != new_val: cfg_fixes += 1
-                    new_lines.append(new_val)
-                elif s.startswith("RecordingDirectory"):
-                    new_val = f"RecordingDirectory {current_music_dir}\n"
-                    if line != new_val: cfg_fixes += 1
-                    new_lines.append(new_val)
-                elif "Mixxx_Portable" in line:
-                    key = line.split(" ")[0]
-                    clean_line = line.replace("\\", "/")
-                    if "Mixxx_Portable/" in clean_line:
-                        sub_path = clean_line.split("Mixxx_Portable/")[-1].strip()
+                clean_line = line.replace("\\", "/")
+                
+                if is_absolute:
+                    if old_root in clean_line:
+                        new_val = clean_line.replace(old_root, current_root)
+                        if line != new_val: cfg_fixes += 1
+                        new_lines.append(new_val)
+                    else:
+                        new_lines.append(line)
+                else:
+                    if f"{old_root}/" in clean_line:
+                        key = clean_line.split(" ", 1)[0]
+                        sub_path = clean_line.split(f"{old_root}/")[-1].strip()
                         new_val = f"{key} {current_root}/{sub_path}\n"
                         if line != new_val: cfg_fixes += 1
                         new_lines.append(new_val)
-                    else: new_lines.append(line)
-                else: new_lines.append(line)
+                    else: 
+                        new_lines.append(line)
             
             with robust_open(cfg_active, 'w') as f:
                 f.writelines(new_lines)
             print(f"[SUCCESS] Config: Applied {cfg_fixes} path updates.")
         except Exception as e: print(f"Config Error: {e}")
 
-    validate_library(db_path)
+    # Save the current state so you can infinitely rename the folder in the future
+    try:
+        with open(db_state_file, "w") as f:
+            f.write(current_root)
+    except Exception as e: pass
+
+    validate_library(db_path, current_root)
 
 if __name__ == "__main__":
     if len(sys.argv) >= 3:
