@@ -92,6 +92,37 @@ If you add music from your computer's local "Downloads" or "Desktop" folders, th
 
 ---
 
+## 📂 Manual Database Restoration
+
+If the automated restoration fails, or if you simply want to roll back your library to a specific point in time (e.g., "how it looked last Tuesday"), you can manually restore a backup.
+
+### **Restoration Steps:**
+
+1.  **Close Mixxx:** Ensure Mixxx and the Smart Launcher are completely closed.
+2.  **Locate your Backups:** 
+    *   Navigate to the `/Mixxx_Data/Backups/` folder on your portable drive.
+    *   Look for the file with the most recent date/time in the name: `mixxxdb_[MachineName]_[YYYYMMDD_HHMMSS].sqlite`.
+3.  **Rename the "Broken" Database:** 
+    *   Go back to the `/Mixxx_Data/` folder.
+    *   Find the active `mixxxdb.sqlite` file and rename it to `mixxxdb.sqlite.old`. This is your safety net.
+4.  **Restore the Backup:**
+    *   Copy the backup file you chose in Step 2 from the `/Backups/` folder.
+    *   Paste it into the main `/Mixxx_Data/` folder.
+    *   Rename that file to exactly: **`mixxxdb.sqlite`**
+5.  **Launch:**
+    *   Run your `start_smart` launcher. The script will detect the "new" database and automatically update the paths to match your current computer.
+
+> [!TIP]
+> **Which backup should I choose?**
+> The backups are named by **Hostname** (the computer name) and **Timestamp**. If you just had a crash on your laptop, look for the file starting with your laptop's name with the most recent time.
+
+--- 
+
+### **Why are there multiple backups?**
+The script keeps the **last 10 backups for every machine** you use. This means if you use a Studio PC and a DJ Laptop, you will see 10 backups for each. This ensures that if a database gets corrupted on one machine and synced via Dropbox, you can still find a healthy version from either device.
+
+---
+
 ## 📜 License
 This project is licensed under the **GPL-3.0**. 
 
