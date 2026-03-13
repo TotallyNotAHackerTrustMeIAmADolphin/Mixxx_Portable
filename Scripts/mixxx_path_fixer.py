@@ -115,7 +115,9 @@ def fix_paths(data_dir, to_os, mode="load"):
             targets =[
                 ("track_locations", "location", "id"), ("track_locations", "directory", "id"),
                 ("library", "location", "id"), ("library", "folder", "id"),
-                ("LibraryHashes", "directory_path", "directory_path")
+                ("LibraryHashes", "directory_path", "directory_path"),
+                # --> NEW FIX: Add the 'directories' table which Mixxx uses for the Library root path
+                ("directories", "directory", "directory")
             ]
 
             for table, col, pkey in targets:
@@ -128,7 +130,8 @@ def fix_paths(data_dir, to_os, mode="load"):
                         clean_old = old_path.replace("\\", "/")
                         if "Mixxx_Portable/Music" in clean_old:
                             sub_path = clean_old.split("Mixxx_Portable/Music")[-1].lstrip("/")
-                            new_path = f"{current_music_dir}/{sub_path}"
+                            # --> NEW FIX: Using rstrip("/") ensures the root library path never gets a trailing slash appended
+                            new_path = f"{current_music_dir}/{sub_path}".rstrip("/")
                             if clean_old != new_path:
                                 cur.execute(f"UPDATE {table} SET {col} = ? WHERE {pkey} = ?", (new_path, pk))
                                 total_updated += 1
@@ -143,7 +146,7 @@ def fix_paths(data_dir, to_os, mode="load"):
             with robust_open(cfg_active, 'r') as f:
                 lines = f.readlines()
             
-            new_lines = []; cfg_fixes = 0
+            new_lines =[]; cfg_fixes = 0
             in_lib = False
             for line in lines:
                 s = line.strip()
