@@ -60,7 +60,7 @@ This project requires **Python 3** to be installed on your system to perform the
 ## 🚀 Setup Guide
 
 ### 1. Initial Preparation
-1.  **Install Mixxx** normally on your host machines.
+1.  **Install Mixxx** normally on your host machines. (if mixxx doesn't launch on linux, try installing it via the packet manager by running `sudo apt install mixxx
 2.  **Clone/Copy this Repo** to your portable drive.
 3.  **Move your Music:** Place all your tracks inside the `/Music` folder.
 4.  **Initial Setup:** On the first run on a new machine, launch via the relevant `.bat` or `.sh` file. 
@@ -107,6 +107,7 @@ If you add music from your computer's local folders, the script cannot "fix" the
 This project is licensed under the **GPL-3.0**. 
 
 > 🐬 *Trust me, I'm a dolphin. Your database is in safe fins.*
+
 
 
 
