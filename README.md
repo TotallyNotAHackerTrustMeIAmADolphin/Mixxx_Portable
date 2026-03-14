@@ -1,7 +1,3 @@
-This is a great addition. On Linux and macOS, scripts are often blocked from running until the user explicitly grants "Execute" permissions. Adding these commands to the README will save users a lot of frustration.
-
-***
-
 # 🎧 Mixxx-Anywhere: Professional Portable & Cloud Sync
 
 **Mixxx-Anywhere** is a robust, logic-driven wrapper for the [Mixxx DJ software](https://mixxx.org). It allows you to run a fully synced DJ setup from a portable drive (USB/SSD) or a cloud-synced folder (Dropbox/OneDrive) across **Windows, Linux, and macOS** without ever seeing a "Missing Track" error or a database crash.
