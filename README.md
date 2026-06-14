@@ -17,7 +17,7 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 
 *   **Structure-Based Detection:** Rename your portable folder to anything you like. The script dynamically deduces the root by locating your `/Music` anchor.
 *   **Cloud-Sync "Dirty Flag":** Detects if the database was last used on a different machine. If the other machine hasn't finished uploading to the cloud, the script warns you before you create a sync conflict.
-*   **External Track Protection:** Detects if you've added tracks from outside your portable drive. On exit, it offers to automatically "ingest" them into your portable folder or remove them from the database to prevent broken paths.
+*   **External Track Protection:** Detects tracks added from outside your portable drive. It distinguishes between tracks reachable on the current PC (offers to "ingest" them) and tracks "NOT PRESENT ON THIS PC" (zombie entries from other hosts).
 *   **Performance Optimization:** Automatically triggers `VACUUM` and `PRAGMA optimize` on exit to keep library searches lightning-fast.
 *   **Smart Hardware Scrub:** On brand-new computers, the script "scrubs" only the audio hardware section of the config to prevent OS crashes.
 *   **Process Guard:** Prevents launching a second instance of Mixxx, the leading cause of portable database corruption.
@@ -93,7 +93,8 @@ To keep your library 100% synced, you **must** follow this rule:
 | `⚠️ CLOUD-SYNC WARNING` | Database was last used on [Machine X]. | Ensure [Machine X] has finished uploading to the cloud before clicking 'y'. |
 | `❌ DATABASE CORRUPTION DETECTED` | The file is unreadable. | Choose 'y' to restore the latest backup. |
 | `ℹ️ NO DATABASE FOUND` | You deleted the DB or this is a fresh install. | Mixxx will create a new one on launch. |
-| `⚠️ TRACKS OUTSIDE DRIVE` | Tracks were found on the host PC, not the USB. | Close Mixxx to trigger the Auto-Ingest prompt. |
+| `⚠️ TRACKS OUTSIDE DRIVE` | Reachable tracks found on the host PC. | Close Mixxx to trigger the Auto-Ingest prompt. |
+| `⚠️ NOT PRESENT ON THIS PC` | Tracks from another host PC (missing here). | Close Mixxx to trigger the Cleanup prompt. |
 
 ---
 

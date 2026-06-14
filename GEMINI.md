@@ -21,7 +21,7 @@ Mixxx-Anywhere is a portable, logic-driven wrapper for the [Mixxx DJ software](h
     *   **DB Migration:** Rewrites `location` and `directory` columns in `track_locations`, `LibraryHashes`, and `directories` tables.
     *   **Hardware Profiling:** Saves and restores `mixxx.cfg` based on the current machine's hostname.
     *   **Safety Guards:** Prevents multiple instances and warns about cloud-sync "dirty" states.
-    *   **External Track Ingestion:** Detects tracks outside the portable folder and offers to copy them to `Music/_Imported/` or remove them from the database on exit.
+    *   **External Track Ingestion:** Distinguishes between reachable external tracks and those "Not Present on this PC" (other hosts/deleted). Offers to copy reachable tracks to `Music/_Imported/` or remove all problematic entries on exit.
     *   **Backups:** Maintains 10 rolling SQLite backups per machine.
 
 ### 📊 Data Storage (`Mixxx_Data/`)
