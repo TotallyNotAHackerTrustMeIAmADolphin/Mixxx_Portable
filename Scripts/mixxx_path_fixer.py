@@ -107,42 +107,55 @@ def handle_external_tracks(db_path, current_root, data_dir):
     external = get_external_tracks(db_path, current_root)
     if not external: return
 
-    log(f"\n⚠️  Found {len(external)} tracks outside the portable drive:", data_dir)
-    for _, artist, title, path in external:
-        log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+    reachable = [t for t in external if os.path.exists(t[3])]
+    missing = [t for t in external if t not in reachable]
 
-    choice = input("\nCopy these tracks to portable Music/_Imported/? (y/N): ").lower()
-    if choice == 'y':
-        import_dir = os.path.join(current_root, "Music", "_Imported")
-        os.makedirs(import_dir, exist_ok=True)
-        try:
-            conn = sqlite3.connect(db_path, timeout=30.0)
-            cur = conn.cursor()
-            for tl_id, artist, title, old_path in external:
-                filename = os.path.basename(old_path)
-                new_path = os.path.join(import_dir, filename)
-                
-                # Handle collisions
-                if os.path.exists(new_path):
-                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    name, ext = os.path.splitext(filename)
-                    new_path = os.path.join(import_dir, f"{name}_{ts}{ext}")
-                
-                log(f"🚚 Copying: {filename}...", data_dir)
-                shutil.copy2(old_path, new_path)
-                
-                # Update DB
-                norm_new_path = mixxx_normalize_path(new_path)
-                norm_new_dir = mixxx_normalize_path(os.path.dirname(new_path))
-                cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?", 
-                           (norm_new_path, norm_new_dir, tl_id))
-            conn.commit()
-            conn.close()
-            log("✅ All tracks imported and database updated.", data_dir)
-        except Exception as e:
-            log(f"❌ Error during import: {e}", data_dir)
-    else:
-        choice = input("Remove these tracks from the database instead? (y/N): ").lower()
+    if missing:
+        log(f"\n⚠️  Found {len(missing)} tracks NOT PRESENT ON THIS PC (other host or deleted):", data_dir)
+        for _, artist, title, path in missing:
+            log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+
+    if reachable:
+        log(f"\n⚠️  Found {len(reachable)} tracks located outside the portable drive on this PC:", data_dir)
+        for _, artist, title, path in reachable:
+            log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+
+    # 1. Ingest (Copy) - Only for reachable tracks
+    if reachable:
+        choice = input(f"\nCopy {len(reachable)} reachable tracks to portable Music/_Imported/? (y/N): ").lower()
+        if choice == 'y':
+            import_dir = os.path.join(current_root, "Music", "_Imported")
+            os.makedirs(import_dir, exist_ok=True)
+            try:
+                conn = sqlite3.connect(db_path, timeout=30.0)
+                cur = conn.cursor()
+                for tl_id, artist, title, old_path in reachable:
+                    filename = os.path.basename(old_path)
+                    new_path = os.path.join(import_dir, filename)
+                    
+                    # Handle collisions
+                    if os.path.exists(new_path):
+                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        name, ext = os.path.splitext(filename)
+                        new_path = os.path.join(import_dir, f"{name}_{ts}{ext}")
+                    
+                    log(f"🚚 Copying: {filename}...", data_dir)
+                    shutil.copy2(old_path, new_path)
+                    
+                    # Update DB
+                    norm_new_path = mixxx_normalize_path(new_path)
+                    norm_new_dir = mixxx_normalize_path(os.path.dirname(new_path))
+                    cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?", 
+                               (norm_new_path, norm_new_dir, tl_id))
+                conn.commit()
+                conn.close()
+                log("✅ Ingest complete. Database updated.", data_dir)
+            except Exception as e:
+                log(f"❌ Error during import: {e}", data_dir)
+
+    # 2. Cleanup (Remove) - For both reachable and missing
+    if external:
+        choice = input(f"Remove {len(external)} non-present or external tracks from the database? (y/N): ").lower()
         if choice == 'y':
             try:
                 conn = sqlite3.connect(db_path, timeout=30.0)
@@ -152,15 +165,27 @@ def handle_external_tracks(db_path, current_root, data_dir):
                     cur.execute("DELETE FROM track_locations WHERE id = ?", (tl_id,))
                 conn.commit()
                 conn.close()
-                log("✅ External tracks removed from database.", data_dir)
+                log("✅ Database entries removed.", data_dir)
             except Exception as e:
                 log(f"❌ Error removing tracks: {e}", data_dir)
 
 def validate_library(db_path, current_root, data_dir):
     external = get_external_tracks(db_path, current_root)
-    if external:
-        log(f"⚠️  WARNING: {len(external)} tracks are located outside the portable drive!", data_dir)
-        log("   Run 'save' (close Mixxx) to resolve this.", data_dir)
+    if not external: return
+
+    reachable = [t for t in external if os.path.exists(t[3])]
+    missing = [t for t in external if t not in reachable]
+
+    if missing:
+        log(f"\n⚠️  WARNING: {len(missing)} tracks are NOT PRESENT ON THIS PC (on another machine or deleted):", data_dir)
+        for _, artist, title, path in missing:
+            log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+
+    if reachable:
+        log(f"\n⚠️  WARNING: {len(reachable)} tracks are located outside the portable drive found on this PC:", data_dir)
+        for _, artist, title, path in reachable:
+            log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+        log("\n💡 Tip: Close Mixxx and run 'save' to fix reachable tracks automatically.\n", data_dir)
 
 # --- MAIN ENGINE ---
 
