@@ -19,7 +19,7 @@ if not exist "%PORTABLE_PYTHON%" (
 )
 
 :: 2. Prepare Environment
-"%PORTABLE_PYTHON%" "%SCRIPT_DIR%\mixxx_path_fixer.py" "%DATA_DIR%" "windows" "load"
+"%PORTABLE_PYTHON%" "%SCRIPT_DIR%\mixxx_path_fixer.py" "%DATA_DIR%" "windows" "load" %*
 if %ERRORLEVEL% NEQ 0 (
     echo ❌ Initialization failed.
     pause

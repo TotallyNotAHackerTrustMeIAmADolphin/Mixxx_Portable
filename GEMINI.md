@@ -11,9 +11,9 @@ Mixxx-Anywhere is a portable, logic-driven wrapper for the [Mixxx DJ software](h
 ## 📂 Architecture & Key Files
 
 ### 🚀 Entry Points
-*   `start_smart_win.bat`: Windows launcher. Detects `mixxx.exe` in common installation paths and uses portable Python if available.
-*   `start_smart_lin.sh`: Linux launcher. Requires system-wide `python3` and `mixxx` installations.
-*   `start_smart_mac.sh`: macOS launcher (Untested).
+*   `start_smart_windows.bat`: Windows launcher. Detects `mixxx.exe` in common installation paths and uses portable Python if available.
+*   `start_smart_linux.sh`: Linux launcher. Requires system-wide `python3` and `mixxx` installations.
+*   `start_smart_macos.sh`: macOS launcher (Untested).
 
 ### 🧠 Logic Engine (`Scripts/`)
 *   `mixxx_path_fixer.py`: The heart of the project.
@@ -40,9 +40,9 @@ Mixxx-Anywhere is a portable, logic-driven wrapper for the [Mixxx DJ software](h
 This is a wrapper project; it does not "build" in the traditional sense but relies on the host having Mixxx installed.
 
 ### Launching
-*   **Windows:** Run `start_smart_win.bat`.
-*   **Linux:** Run `./start_smart_lin.sh`.
-*   **macOS:** Run `./start_smart_mac.sh`.
+*   **Windows:** Run `start_smart_windows.bat`.
+*   **Linux:** Run `./start_smart_linux.sh`.
+*   **macOS:** Run `./start_smart_macos.sh`.
 
 ### Troubleshooting Commands
 *   `python3 Scripts/mixxx_path_fixer.py Mixxx_Data [os] load`: Manually trigger the pre-launch path fixing logic.

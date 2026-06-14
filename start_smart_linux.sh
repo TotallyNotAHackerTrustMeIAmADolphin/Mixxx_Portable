@@ -16,10 +16,17 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# 2. Check for Mixxx
-if ! command -v mixxx &> /dev/null; then
+# 2. Find Mixxx
+MIXXX_CMD=""
+if command -v mixxx &> /dev/null; then
+    MIXXX_CMD="mixxx"
+elif command -v flatpak &> /dev/null && flatpak list | grep -q org.mixxx.Mixxx; then
+    MIXXX_CMD="flatpak run org.mixxx.Mixxx"
+fi
+
+if [ -z "$MIXXX_CMD" ]; then
     echo "❌ ERROR: Mixxx is not installed on this system."
-    echo "Fix: Run 'sudo apt update && sudo apt install mixxx'"
+    echo "Fix: Run 'sudo apt update && sudo apt install mixxx' or install via Flatpak."
     read -p "Press Enter to exit..."
     exit 1
 fi
@@ -29,7 +36,7 @@ python3 "$SCRIPT_DIR/mixxx_path_fixer.py" "$DATA_DIR" "linux" "load"
 
 if [ $? -eq 0 ]; then
     # 4. Launch Mixxx
-    mixxx --settingsPath "$DATA_DIR"
+    $MIXXX_CMD --settingsPath "$DATA_DIR"
     
     # 5. Save session settings
     echo "Saving machine settings..."

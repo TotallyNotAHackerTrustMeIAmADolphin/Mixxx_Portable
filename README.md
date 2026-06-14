@@ -29,9 +29,9 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 
 ```text
 /Your_Portable_Drive/
-├── start_smart_win.bat   # Windows Entry Point
-├── start_smart_lin.sh    # Linux Entry Point
-├── start_smart_mac.sh    # macOS Entry Point
+├── start_smart_windows.bat   # Windows Entry Point
+├── start_smart_linux.sh      # Linux Entry Point
+├── start_smart_macos.sh      # macOS Entry Point
 ├── Music/                # THE ANCHOR: Put ALL your audio files here
 │   └── _Imported/        # Auto-created for ingested external tracks
 ├── Mixxx_Data/           # Your portable settingsPath folder
@@ -59,12 +59,12 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 *   **Install Python 3:** `sudo apt install python3`
 *   **Install Mixxx:** `sudo add-apt-repository ppa:mixxx/mixxx && sudo apt update && sudo apt install mixxx`
 *   **Permissions:** Open a terminal in your portable folder and run:
-    `chmod +x start_smart_lin.sh`
+    `chmod +x start_smart_linux.sh`
 
 ### **macOS**
 *   **Install Mixxx:** Download from [mixxx.org](https://mixxx.org/download/).
 *   **Permissions:** Open a terminal in your portable folder and run:
-    `chmod +x start_smart_mac.sh`
+    `chmod +x start_smart_macos.sh`
 *   **System Privacy:** Go to *System Settings > Privacy & Security > Files and Folders* and ensure **Mixxx** has permission to access **Removable Volumes**.
 
 ---

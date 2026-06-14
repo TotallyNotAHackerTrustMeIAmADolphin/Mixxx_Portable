@@ -32,7 +32,7 @@ fi
 
 # 3. Run Path Fixer (LOAD mode)
 # This will also trigger the "Already Running" check within Python
-python3 "$SCRIPT_DIR/mixxx_path_fixer.py" "$DATA_DIR" "mac" "load"
+python3 "$SCRIPT_DIR/mixxx_path_fixer.py" "$DATA_DIR" "mac" "load" "$@"
 
 # Check if Python script exited successfully (e.g., didn't hit 'Already Running' block)
 if [ $? -eq 0 ]; then
