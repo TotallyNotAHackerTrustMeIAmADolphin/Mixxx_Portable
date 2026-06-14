@@ -74,7 +74,8 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 1.  **Copy this project** to your USB drive or Dropbox folder.
 2.  **Move your tracks** into the `/Music` folder.
 3.  **Launch** using the `start_smart` file for your current OS.
-4.  **First Run:** Set your **Sound Hardware**. When you close Mixxx, the script saves these settings for *this specific computer*.
+4.  **Select library** on the first start Mixxx prompts you to select a library folder. select the `/Music`folder.
+5.  **First Run:** Set your **Sound Hardware**. When you close Mixxx, the script saves these settings for *this specific computer*.
 
 ---
 
