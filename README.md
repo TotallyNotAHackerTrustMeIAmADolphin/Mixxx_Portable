@@ -17,6 +17,7 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 
 *   **Structure-Based Detection:** Rename your portable folder to anything you like. The script dynamically deduces the root by locating your `/Music` anchor.
 *   **Cloud-Sync "Dirty Flag":** Detects if the database was last used on a different machine. If the other machine hasn't finished uploading to the cloud, the script warns you before you create a sync conflict.
+*   **External Track Protection:** Detects if you've added tracks from outside your portable drive. On exit, it offers to automatically "ingest" them into your portable folder or remove them from the database to prevent broken paths.
 *   **Performance Optimization:** Automatically triggers `VACUUM` and `PRAGMA optimize` on exit to keep library searches lightning-fast.
 *   **Smart Hardware Scrub:** On brand-new computers, the script "scrubs" only the audio hardware section of the config to prevent OS crashes.
 *   **Process Guard:** Prevents launching a second instance of Mixxx, the leading cause of portable database corruption.
@@ -32,6 +33,7 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 ├── start_smart_lin.sh    # Linux Entry Point
 ├── start_smart_mac.sh    # macOS Entry Point
 ├── Music/                # THE ANCHOR: Put ALL your audio files here
+│   └── _Imported/        # Auto-created for ingested external tracks
 ├── Mixxx_Data/           # Your portable settingsPath folder
 │   ├── mixxxdb.sqlite    # The ACTIVE Library Database
 │   ├── mixxx.cfg         # The ACTIVE config (swapped per session)
@@ -91,6 +93,7 @@ To keep your library 100% synced, you **must** follow this rule:
 | `⚠️ CLOUD-SYNC WARNING` | Database was last used on [Machine X]. | Ensure [Machine X] has finished uploading to the cloud before clicking 'y'. |
 | `❌ DATABASE CORRUPTION DETECTED` | The file is unreadable. | Choose 'y' to restore the latest backup. |
 | `ℹ️ NO DATABASE FOUND` | You deleted the DB or this is a fresh install. | Mixxx will create a new one on launch. |
+| `⚠️ TRACKS OUTSIDE DRIVE` | Tracks were found on the host PC, not the USB. | Close Mixxx to trigger the Auto-Ingest prompt. |
 
 ---
 
@@ -107,7 +110,6 @@ To keep your library 100% synced, you **must** follow this rule:
 ## 🛠 Future Plans & WIP
 
 *   **M3U Playlist Export:** Automatically generate portable relative-path playlists for use in VLC or mobile apps.
-*   **Music Fetcher:** A script to find tracks scattered across your host computer and "collect" them into the `/Music` folder.
 *   **Binary Download Helper:** A "Zero-Install" script to download portable Mixxx binaries directly to the drive.
 *   **GUI Wrapper:** A simple visual interface to replace the terminal window.
 *   **Automatic Offsite Backups:** Integration with Backblaze/S3 for secondary library protection.

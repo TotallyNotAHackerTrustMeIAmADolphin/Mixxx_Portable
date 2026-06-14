@@ -81,19 +81,86 @@ def get_old_root_from_db(db_path):
     except Exception: pass
     return None
 
-def validate_library(db_path, current_root, data_dir):
-    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return
+def get_external_tracks(db_path, current_root):
+    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return []
+    external = []
     try:
         conn = sqlite3.connect(db_path, timeout=5.0)
         cur = conn.cursor()
+        # Check if tables exist
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='track_locations'")
-        if cur.fetchone():
-            cur.execute("SELECT location FROM track_locations WHERE location NOT LIKE ?", (f"{current_root}%",))
-            external = cur.fetchall()
-            if external:
-                log(f"⚠️  WARNING: {len(external)} tracks are located outside the portable drive!", data_dir)
+        if not cur.fetchone(): return []
+        
+        query = """
+            SELECT tl.id, l.artist, l.title, tl.location 
+            FROM track_locations tl
+            LEFT JOIN library l ON l.location = tl.id
+            WHERE tl.location NOT LIKE ?
+        """
+        cur.execute(query, (f"{current_root}%",))
+        external = cur.fetchall()
         conn.close()
     except Exception: pass
+    return external
+
+def handle_external_tracks(db_path, current_root, data_dir):
+    external = get_external_tracks(db_path, current_root)
+    if not external: return
+
+    log(f"\n⚠️  Found {len(external)} tracks outside the portable drive:", data_dir)
+    for _, artist, title, path in external:
+        log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+
+    choice = input("\nCopy these tracks to portable Music/_Imported/? (y/N): ").lower()
+    if choice == 'y':
+        import_dir = os.path.join(current_root, "Music", "_Imported")
+        os.makedirs(import_dir, exist_ok=True)
+        try:
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            cur = conn.cursor()
+            for tl_id, artist, title, old_path in external:
+                filename = os.path.basename(old_path)
+                new_path = os.path.join(import_dir, filename)
+                
+                # Handle collisions
+                if os.path.exists(new_path):
+                    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    name, ext = os.path.splitext(filename)
+                    new_path = os.path.join(import_dir, f"{name}_{ts}{ext}")
+                
+                log(f"🚚 Copying: {filename}...", data_dir)
+                shutil.copy2(old_path, new_path)
+                
+                # Update DB
+                norm_new_path = mixxx_normalize_path(new_path)
+                norm_new_dir = mixxx_normalize_path(os.path.dirname(new_path))
+                cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?", 
+                           (norm_new_path, norm_new_dir, tl_id))
+            conn.commit()
+            conn.close()
+            log("✅ All tracks imported and database updated.", data_dir)
+        except Exception as e:
+            log(f"❌ Error during import: {e}", data_dir)
+    else:
+        choice = input("Remove these tracks from the database instead? (y/N): ").lower()
+        if choice == 'y':
+            try:
+                conn = sqlite3.connect(db_path, timeout=30.0)
+                cur = conn.cursor()
+                for tl_id, _, _, _ in external:
+                    cur.execute("DELETE FROM library WHERE location = ?", (tl_id,))
+                    cur.execute("DELETE FROM track_locations WHERE id = ?", (tl_id,))
+                conn.commit()
+                conn.close()
+                log("✅ External tracks removed from database.", data_dir)
+            except Exception as e:
+                log(f"❌ Error removing tracks: {e}", data_dir)
+
+def validate_library(db_path, current_root, data_dir):
+    external = get_external_tracks(db_path, current_root)
+    if external:
+        log(f"⚠️  WARNING: {len(external)} tracks are located outside the portable drive!", data_dir)
+        log("   Run 'save' (close Mixxx) to resolve this.", data_dir)
 
 # --- MAIN ENGINE ---
 
@@ -138,6 +205,7 @@ def fix_paths(data_dir, to_os, mode="load"):
     if mode == "save":
         if os.path.exists(cfg_active):
             shutil.copy2(cfg_active, os.path.join(config_dir, f"mixxx.cfg.{hostname}"))
+        handle_external_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
         if os.path.exists(sync_lock): os.remove(sync_lock)
         log(f"[SUCCESS] Session closed cleanly.", data_dir)
