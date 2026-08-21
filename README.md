@@ -15,12 +15,12 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 
 ## 🚀 Key Features
 
-*   **Structure-Based Detection:** Rename your portable folder to anything you like. The script dynamically deduces the root by locating your `/Music` anchor.
+*   **Structure-Based Detection:** Rename your portable folder to anything you like — the script locates itself on disk to determine the current root, then tracks the exact previous root via a small sidecar file (`.mixxx_last_root`), so there's never any guessing involved in the migration.
 *   **Cloud-Sync "Dirty Flag":** Detects if the database was last used on a different machine. If the other machine hasn't finished uploading to the cloud, the script warns you before you create a sync conflict.
 *   **External Track Protection:** Detects tracks added from outside your portable drive. It distinguishes between tracks reachable on the current PC (offers to "ingest" them) and tracks "NOT PRESENT ON THIS PC" (zombie entries from other hosts).
 *   **Performance Optimization:** Automatically triggers `VACUUM` and `PRAGMA optimize` on exit to keep library searches lightning-fast.
 *   **Smart Hardware Scrub:** On brand-new computers, the script "scrubs" only the audio hardware section of the config to prevent OS crashes.
-*   **Process Guard:** Prevents launching a second instance of Mixxx, the leading cause of portable database corruption.
+*   **Process Guard:** Prevents launching a second instance of Mixxx — the leading cause of portable database corruption — using both a running-process check and an atomic lock file, closing the gap between two near-simultaneous launches (e.g. a double-click).
 *   **Session Logging:** Maintains a `launcher_log.txt` for easy debugging of path migrations.
 
 ---
@@ -39,6 +39,8 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 │   ├── mixxx.cfg         # The ACTIVE config (swapped per session)
 │   ├── launcher_log.txt  # History of path migrations
 │   ├── .mixxx_is_active  # Hidden sync-protection flag
+│   ├── .mixxx_launch.lock # Hidden lock preventing double-launches
+│   ├── .mixxx_last_root  # Hidden sidecar tracking the exact last-used root
 │   ├── controllers/      # Your custom MIDI mappings
 │   ├── Configs/          # Machine-specific hardware backups
 │   └── Backups/          # Rolling DB backups (10 per machine)
@@ -91,6 +93,7 @@ To keep your library 100% synced, you **must** follow this rule:
 | Message | Meaning | Fix |
 | :--- | :--- | :--- |
 | `❌ ERROR: MIXXX IS ALREADY RUNNING` | A Mixxx process is already active. | Close all Mixxx windows. |
+| `❌ ERROR: ANOTHER LAUNCH IS ALREADY IN PROGRESS` | Two launches were started at nearly the same time (e.g. a double-click), or a previous session crashed before closing cleanly. | Wait a moment and try again; if it persists after confirming Mixxx isn't actually running, delete `Mixxx_Data/.mixxx_launch.lock`. |
 | `⚠️ CLOUD-SYNC WARNING` | Database was last used on [Machine X]. | Ensure [Machine X] has finished uploading to the cloud before clicking 'y'. |
 | `❌ DATABASE CORRUPTION DETECTED` | The file is unreadable. | Choose 'y' to restore the latest backup. |
 | `ℹ️ NO DATABASE FOUND` | You deleted the DB or this is a fresh install. | Mixxx will create a new one on launch. |
