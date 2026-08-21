@@ -76,6 +76,7 @@ def get_old_root_from_db(db_path):
         rows = cur.fetchall()
         conn.close()
         for (path_str,) in rows:
+            if not path_str: continue
             p = path_str.replace('\\', '/')
             if p.endswith('/Music'): return p[:-6]
     except Exception: pass
