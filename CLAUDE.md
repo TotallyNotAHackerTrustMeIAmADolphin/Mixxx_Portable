@@ -42,6 +42,7 @@ Key mechanics inside `fix_paths()`:
   
   The lock is claimed at the start of `load` and released at the end of `save` via `release_session_lock()`.
 - **External track handling**: tracks in the DB outside the portable `Music/` root are split into *reachable* (exists on this filesystem — offered for copy-in to `Music/_Imported/`) vs *missing* (not present here — likely lives only on another host, offered for DB removal). This runs interactively (`input()`) during `save`, and read-only (`validate_library`, warning only) during `load`.
+- **Missing in-library track handling**: separately, `get_missing_library_tracks()`/`handle_missing_library_tracks()` catch tracks *inside* `Music/` whose file no longer exists on this filesystem — a case `get_external_tracks()` never sees, since it only looks outside `Music/`. Because `Music/` is the cloud-synced folder itself, "missing" here is ambiguous (genuinely deleted vs. a Dropbox/OneDrive download still in flight), so like external tracks this is warn-only on `load` (folded into `validate_library`) and requires an explicit `y` on `save` before removing DB rows — never auto-deleted.
 - **Backups & integrity**: `load` takes a timestamped snapshot into `Mixxx_Data/Backups/` before migrating, keeping the last 10 per hostname (`mixxxdb_<hostname>_*.sqlite`), and runs `PRAGMA integrity_check`, offering restore-from-backup on corruption. `save` runs `PRAGMA optimize` + `VACUUM`.
 
 ## Conventions

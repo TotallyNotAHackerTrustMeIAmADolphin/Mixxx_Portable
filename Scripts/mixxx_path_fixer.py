@@ -225,6 +225,61 @@ def get_external_tracks(db_path, current_root):
     except Exception: pass
     return external
 
+def get_missing_library_tracks(db_path, current_root):
+    """Tracks whose path is INSIDE the portable Music/ root but whose file
+    does not exist on this filesystem. Distinct from get_external_tracks(),
+    which only ever looks at paths outside Music/ — a file deleted (or not
+    yet synced down by Dropbox/OneDrive) from inside Music/ never shows up
+    there and would otherwise go completely undetected."""
+    if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return []
+    missing = []
+    try:
+        conn = sqlite3.connect(db_path, timeout=15.0)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='track_locations'")
+        if not cur.fetchone():
+            conn.close()
+            return []
+        query = """
+            SELECT tl.id, l.artist, l.title, tl.location
+            FROM track_locations tl
+            LEFT JOIN library l ON l.location = tl.id
+        """
+        cur.execute(query)
+        prefix = current_root + "/Music/"
+        for row in cur.fetchall():
+            loc = row[3] or ""
+            if loc.startswith(prefix) and not os.path.exists(loc):
+                missing.append(row)
+        conn.close()
+    except Exception: pass
+    return missing
+
+def handle_missing_library_tracks(db_path, current_root, data_dir):
+    missing = get_missing_library_tracks(db_path, current_root)
+    if not missing: return
+
+    log(f"\n⚠️  Found {len(missing)} tracks inside Music/ that no longer exist on disk:", data_dir)
+    for _, artist, title, path in missing:
+        log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+    log("\n💡 A file shows up here if it was deleted, OR if a cloud-sync backend", data_dir)
+    log("   (Dropbox/OneDrive) hasn't finished downloading it to this machine yet.", data_dir)
+    log("   Only remove entries you're sure are actually gone, not just still syncing.", data_dir)
+
+    choice = input(f"\nRemove these {len(missing)} entries from the database? (y/N): ").lower()
+    if choice == 'y':
+        try:
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            cur = conn.cursor()
+            for tl_id, _, _, _ in missing:
+                cur.execute("DELETE FROM library WHERE location = ?", (tl_id,))
+                cur.execute("DELETE FROM track_locations WHERE id = ?", (tl_id,))
+            conn.commit()
+            conn.close()
+            log("✅ Database entries removed.", data_dir)
+        except Exception as e:
+            log(f"❌ Error removing tracks: {e}", data_dir)
+
 def handle_external_tracks(db_path, current_root, data_dir):
     external = get_external_tracks(db_path, current_root)
     if not external: return
@@ -314,7 +369,8 @@ def handle_external_tracks(db_path, current_root, data_dir):
 
 def validate_library(db_path, current_root, data_dir):
     external = get_external_tracks(db_path, current_root)
-    if not external: return
+    missing_in_library = get_missing_library_tracks(db_path, current_root)
+    if not external and not missing_in_library: return
 
     reachable = [t for t in external if os.path.exists(t[3])]
     missing = [t for t in external if t not in reachable]
@@ -329,6 +385,13 @@ def validate_library(db_path, current_root, data_dir):
         for _, artist, title, path in reachable:
             log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
         log("\n💡 Tip: Close Mixxx and run 'save' to fix reachable tracks automatically.\n", data_dir)
+
+    if missing_in_library:
+        log(f"\n⚠️  WARNING: {len(missing_in_library)} tracks inside Music/ no longer exist on disk:", data_dir)
+        for _, artist, title, path in missing_in_library:
+            log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
+        log("\n💡 Could be a deleted file, or a cloud-sync backend still catching up.", data_dir)
+        log("   Close Mixxx and run 'save' if you want to remove confirmed-deleted entries.\n", data_dir)
 
 # --- MAIN ENGINE ---
 
@@ -403,6 +466,7 @@ def fix_paths(data_dir, to_os, mode="load"):
         if os.path.exists(cfg_active):
             shutil.copy2(cfg_active, os.path.join(config_dir, f"mixxx.cfg.{hostname}"))
         handle_external_tracks(db_path, current_root, data_dir)
+        handle_missing_library_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
         write_last_root(data_dir, current_root)
         release_session_lock(data_dir)
