@@ -29,6 +29,10 @@ def mixxx_normalize_path(path_str):
         path_str = path_str[0].upper() + path_str[1:]
     return path_str
 
+def sql_like_escape(s):
+    """Escapes '\\', '%' and '_' so a path can be used as a literal prefix in a SQL LIKE pattern (pair with ESCAPE '\\')."""
+    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
 def is_mixxx_running():
     try:
         if sys.platform == "win32":
@@ -95,13 +99,18 @@ def get_external_tracks(db_path, current_root):
             return []
 
         query = """
-            SELECT tl.id, l.artist, l.title, tl.location 
+            SELECT tl.id, l.artist, l.title, tl.location
             FROM track_locations tl
             LEFT JOIN library l ON l.location = tl.id
-            WHERE tl.location NOT LIKE ?
         """
-        cur.execute(query, (f"{current_root}%",))
-        external = cur.fetchall()
+        cur.execute(query)
+        # Filter in Python rather than SQL LIKE: current_root can contain
+        # '_' or '%' (both SQL wildcards), which would otherwise make LIKE
+        # match paths that merely resemble the portable root instead of
+        # actually being inside it (e.g. ".../My_Drive" matching
+        # ".../MyXDrive" since '_' matches any single character).
+        prefix = current_root + "/"
+        external = [row for row in cur.fetchall() if not (row[3] or "").startswith(prefix)]
         conn.close()
     except Exception: pass
     return external
@@ -283,11 +292,15 @@ def fix_paths(data_dir, to_os, mode="load"):
                 cur = conn.cursor()
                 targets = [("track_locations", "location"), ("track_locations", "directory"),
                            ("LibraryHashes", "directory_path"), ("directories", "directory")]
+                # Escape SQL wildcards in old_root and require a '/' boundary after it,
+                # so a root containing '_'/'%' (e.g. "My_Drive") or a sibling directory
+                # with a similar name (e.g. "DevelopmentBackup") can't falsely match.
+                like_pattern = sql_like_escape(old_root) + "/%"
                 for table, col in targets:
                     cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
                     if cur.fetchone():
-                        cur.execute(f"UPDATE {table} SET {col} = ? || SUBSTR({col}, LENGTH(?) + 1) WHERE {col} LIKE ? || '%'", 
-                                   (current_root, old_root, old_root))
+                        cur.execute(f"UPDATE {table} SET {col} = ? || SUBSTR({col}, LENGTH(?) + 1) WHERE {col} LIKE ? ESCAPE '\\'",
+                                   (current_root, old_root, like_pattern))
                 conn.commit()
                 conn.close()
             except Exception as e: log(f"Database Error: {e}", data_dir)
