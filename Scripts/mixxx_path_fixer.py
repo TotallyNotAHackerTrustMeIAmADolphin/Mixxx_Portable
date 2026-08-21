@@ -40,10 +40,17 @@ def is_mixxx_running(data_dir=None):
             output = subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
             return "mixxx.exe" in output.lower()
         else:
-            # -f matches the full command line (not just argv[0]), so this
-            # also catches flatpak-sandboxed launches (e.g. "flatpak run
-            # org.mixxx.Mixxx"), which -x 'mixxx' would miss entirely.
-            result = subprocess.run(['pgrep', '-f', 'mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Exact-name match for a native install.
+            result = subprocess.run(['pgrep', '-x', 'mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode == 0:
+                return True
+            # Full-command-line match on the Flatpak app ID (not the bare
+            # word "mixxx") for the sandboxed case, e.g. "flatpak run
+            # org.mixxx.Mixxx". Matching on 'mixxx' alone here would also
+            # match this very script's own process, since its command line
+            # is "python3 .../mixxx_path_fixer.py ..." — a false positive
+            # that would block every single launch.
+            result = subprocess.run(['pgrep', '-f', 'org.mixxx.Mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return result.returncode == 0
     except Exception as e:
         # Fail open (assume not running) so a transient pgrep/tasklist error
