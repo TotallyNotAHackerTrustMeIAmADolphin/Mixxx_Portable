@@ -454,6 +454,7 @@ def fix_paths(data_dir, to_os, mode="load"):
         try:
             with open(cfg_active, 'r', encoding='utf-8', errors='ignore') as f: lines = f.readlines()
             new_lines, has_dir, has_rec, changed = [], False, False, False
+            library_header_idx = None
             for l in lines:
                 if l.startswith("Directory "):
                     new_line = f"Directory {current_music_dir}\n"
@@ -465,13 +466,24 @@ def fix_paths(data_dir, to_os, mode="load"):
                     new_lines.append(new_line); has_rec = True
                 else:
                     new_lines.append(l)
+                    if l.strip() == "[Library]":
+                        library_header_idx = len(new_lines) - 1
             if not has_dir or not has_rec:
                 changed = True
-                if new_lines and not new_lines[-1].endswith("\n"):
-                    new_lines.append("\n")
-                new_lines.append("\n[Library]\n")
-                if not has_dir: new_lines.append(f"Directory {current_music_dir}\n")
-                if not has_rec: new_lines.append(f"RecordingDirectory {current_music_dir}\n")
+                missing = []
+                if not has_dir: missing.append(f"Directory {current_music_dir}\n")
+                if not has_rec: missing.append(f"RecordingDirectory {current_music_dir}\n")
+                if library_header_idx is not None:
+                    # Insert into the existing [Library] section instead of
+                    # appending a second one, which would otherwise create a
+                    # duplicate header every time exactly one key is missing.
+                    insert_at = library_header_idx + 1
+                    new_lines[insert_at:insert_at] = missing
+                else:
+                    if new_lines and not new_lines[-1].endswith("\n"):
+                        new_lines.append("\n")
+                    new_lines.append("\n[Library]\n")
+                    new_lines.extend(missing)
             if changed:
                 with open(cfg_active, 'w', encoding='utf-8') as f:
                     f.writelines(new_lines)
