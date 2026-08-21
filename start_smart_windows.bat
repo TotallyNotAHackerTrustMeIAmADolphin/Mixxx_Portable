@@ -18,15 +18,7 @@ if not exist "%PORTABLE_PYTHON%" (
     exit /b
 )
 
-:: 2. Prepare Environment
-"%PORTABLE_PYTHON%" "%SCRIPT_DIR%\mixxx_path_fixer.py" "%DATA_DIR%" "windows" "load" %*
-if %ERRORLEVEL% NEQ 0 (
-    echo ❌ Initialization failed.
-    pause
-    exit /b
-)
-
-:: 3. Find Mixxx
+:: 2. Find Mixxx
 set "MIXXX_EXE=C:\Program Files\Mixxx\mixxx.exe"
 if not exist "%MIXXX_EXE%" set "MIXXX_EXE=C:\Program Files (x86)\Mixxx\mixxx.exe"
 if not exist "%MIXXX_EXE%" set "MIXXX_EXE=%LOCALAPPDATA%\Mixxx\mixxx.exe"
@@ -34,6 +26,14 @@ if not exist "%MIXXX_EXE%" set "MIXXX_EXE=%LOCALAPPDATA%\Mixxx\mixxx.exe"
 if not exist "%MIXXX_EXE%" (
     echo ❌ ERROR: Mixxx is not installed on this PC.
     echo Please download it from: https://mixxx.org/download/
+    pause
+    exit /b
+)
+
+:: 3. Prepare Environment
+"%PORTABLE_PYTHON%" "%SCRIPT_DIR%\mixxx_path_fixer.py" "%DATA_DIR%" "windows" "load" %*
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ Initialization failed.
     pause
     exit /b
 )

@@ -29,23 +29,65 @@ def mixxx_normalize_path(path_str):
         path_str = path_str[0].upper() + path_str[1:]
     return path_str
 
-def is_mixxx_running():
+def sql_like_escape(s):
+    """Escapes '\\', '%' and '_' so a path can be used as a literal prefix in a SQL LIKE pattern (pair with ESCAPE '\\')."""
+    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+def is_mixxx_running(data_dir=None):
     try:
         if sys.platform == "win32":
             cmd = 'tasklist /FI "IMAGENAME eq mixxx.exe" /FO CSV /NH'
             output = subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
             return "mixxx.exe" in output.lower()
         else:
+            # Exact-name match for a native install.
             result = subprocess.run(['pgrep', '-x', 'mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode == 0:
+                return True
+            # Full-command-line match on the Flatpak app ID (not the bare
+            # word "mixxx") for the sandboxed case, e.g. "flatpak run
+            # org.mixxx.Mixxx". Matching on 'mixxx' alone here would also
+            # match this very script's own process, since its command line
+            # is "python3 .../mixxx_path_fixer.py ..." — a false positive
+            # that would block every single launch.
+            result = subprocess.run(['pgrep', '-f', 'org.mixxx.Mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return result.returncode == 0
-    except: return False
+    except Exception as e:
+        # Fail open (assume not running) so a transient pgrep/tasklist error
+        # doesn't hard-block every launch, but at least leave a trace of why
+        # the process guard couldn't actually verify anything this time.
+        log(f"⚠️  Could not verify whether Mixxx is already running: {e}", data_dir)
+        return False
+
+def acquire_launch_lock(data_dir):
+    """Atomically claims a launch lock file. Returns True if claimed, False if one already exists.
+
+    is_mixxx_running() alone has a check-then-act race: two near-simultaneous
+    launches can both check the process list before either has actually
+    started Mixxx, and both would see "not running". os.O_CREAT|O_EXCL is an
+    atomic filesystem operation, so only one concurrent launch can win this.
+    """
+    lock_path = os.path.join(data_dir, ".mixxx_launch.lock")
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w") as f:
+            f.write(f"{socket.gethostname()} {datetime.datetime.now().isoformat()}\n")
+        return True
+    except FileExistsError:
+        return False
+
+def release_launch_lock(data_dir):
+    lock_path = os.path.join(data_dir, ".mixxx_launch.lock")
+    if os.path.exists(lock_path):
+        try: os.remove(lock_path)
+        except: pass
 
 # --- DATABASE LOGIC ---
 
 def check_db_integrity(db_path, data_dir):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return True
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         res = conn.execute("PRAGMA integrity_check").fetchone()
         conn.close()
         return res[0] == "ok"
@@ -66,7 +108,7 @@ def optimize_db(db_path, data_dir):
 def get_old_root_from_db(db_path):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return None
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='directories'")
         if not cur.fetchone(): 
@@ -76,6 +118,7 @@ def get_old_root_from_db(db_path):
         rows = cur.fetchall()
         conn.close()
         for (path_str,) in rows:
+            if not path_str: continue
             p = path_str.replace('\\', '/')
             if p.endswith('/Music'): return p[:-6]
     except Exception: pass
@@ -85,20 +128,27 @@ def get_external_tracks(db_path, current_root):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return []
     external = []
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         cur = conn.cursor()
         # Check if tables exist
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='track_locations'")
-        if not cur.fetchone(): return []
-        
+        if not cur.fetchone():
+            conn.close()
+            return []
+
         query = """
-            SELECT tl.id, l.artist, l.title, tl.location 
+            SELECT tl.id, l.artist, l.title, tl.location
             FROM track_locations tl
             LEFT JOIN library l ON l.location = tl.id
-            WHERE tl.location NOT LIKE ?
         """
-        cur.execute(query, (f"{current_root}%",))
-        external = cur.fetchall()
+        cur.execute(query)
+        # Filter in Python rather than SQL LIKE: current_root can contain
+        # '_' or '%' (both SQL wildcards), which would otherwise make LIKE
+        # match paths that merely resemble the portable root instead of
+        # actually being inside it (e.g. ".../My_Drive" matching
+        # ".../MyXDrive" since '_' matches any single character).
+        prefix = current_root + "/"
+        external = [row for row in cur.fetchall() if not (row[3] or "").startswith(prefix)]
         conn.close()
     except Exception: pass
     return external
@@ -126,46 +176,62 @@ def handle_external_tracks(db_path, current_root, data_dir):
         if choice == 'y':
             import_dir = os.path.join(current_root, "Music", "_Imported")
             os.makedirs(import_dir, exist_ok=True)
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            copied = 0
             try:
-                conn = sqlite3.connect(db_path, timeout=30.0)
                 cur = conn.cursor()
                 for tl_id, artist, title, old_path in reachable:
                     filename = os.path.basename(old_path)
                     new_path = os.path.join(import_dir, filename)
-                    
-                    # Handle collisions
+
+                    # Handle collisions: keep trying suffixes until the name
+                    # is free, so 3+ colliding files can't clobber each other
+                    # (a fixed one-shot timestamp suffix could still collide
+                    # if multiple files are processed within the same second).
                     if os.path.exists(new_path):
-                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         name, ext = os.path.splitext(filename)
-                        new_path = os.path.join(import_dir, f"{name}_{ts}{ext}")
-                    
+                        counter = 1
+                        while os.path.exists(new_path):
+                            new_path = os.path.join(import_dir, f"{name}_{counter}{ext}")
+                            counter += 1
+
                     log(f"🚚 Copying: {filename}...", data_dir)
                     shutil.copy2(old_path, new_path)
-                    
-                    # Update DB
+
+                    # Update DB and commit immediately, so a failure on a
+                    # later track can't leave an already-copied file with a
+                    # stale DB pointer still stuck on the old external path.
                     norm_new_path = mixxx_normalize_path(new_path)
                     norm_new_dir = mixxx_normalize_path(os.path.dirname(new_path))
-                    cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?", 
+                    cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?",
                                (norm_new_path, norm_new_dir, tl_id))
-                conn.commit()
-                conn.close()
-                log("✅ Ingest complete. Database updated.", data_dir)
+                    conn.commit()
+                    copied += 1
+                log(f"✅ Ingest complete. {copied}/{len(reachable)} tracks imported.", data_dir)
             except Exception as e:
-                log(f"❌ Error during import: {e}", data_dir)
+                log(f"❌ Error during import ({copied}/{len(reachable)} completed before failure): {e}", data_dir)
+            finally:
+                conn.close()
 
-    # 2. Cleanup (Remove) - Re-fetch list to prevent stale data
+    # 2. Cleanup (Remove) - Re-fetch list to prevent stale data.
+    # Only offer removal for tracks NOT reachable on this PC (zombie entries
+    # from another host or genuinely deleted files). Reachable tracks the
+    # user just declined to ingest still exist on disk and must be left
+    # alone, or their Mixxx metadata (cues, ratings, play history) would be
+    # destroyed even though the file itself is fine.
     external = get_external_tracks(db_path, current_root)
-    if external:
-        log(f"\nℹ️  The following {len(external)} tracks are still external or missing:", data_dir)
-        for _, artist, title, path in external:
+    missing = [t for t in external if not os.path.exists(t[3])]
+    if missing:
+        log(f"\nℹ️  The following {len(missing)} tracks are still not present on this PC:", data_dir)
+        for _, artist, title, path in missing:
             log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
-            
-        choice = input(f"\nRemove these {len(external)} entries from the database? (y/N): ").lower()
+
+        choice = input(f"\nRemove these {len(missing)} entries from the database? (y/N): ").lower()
         if choice == 'y':
             try:
                 conn = sqlite3.connect(db_path, timeout=30.0)
                 cur = conn.cursor()
-                for tl_id, _, _, _ in external:
+                for tl_id, _, _, _ in missing:
                     cur.execute("DELETE FROM library WHERE location = ?", (tl_id,))
                     cur.execute("DELETE FROM track_locations WHERE id = ?", (tl_id,))
                 conn.commit()
@@ -199,10 +265,28 @@ def fix_paths(data_dir, to_os, mode="load"):
     os.makedirs(data_dir, exist_ok=True)
     
     # Process Protection
-    if mode == "load" and is_mixxx_running():
-        log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
-        input("Press Enter to exit...")
-        sys.exit(1)
+    if mode == "load":
+        if is_mixxx_running(data_dir):
+            log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
+            input("Press Enter to exit...")
+            sys.exit(1)
+
+        # Close the race between is_mixxx_running() and Mixxx actually
+        # starting: os.O_CREAT|O_EXCL is atomic, so of two near-simultaneous
+        # launches, only one can claim this lock.
+        if not acquire_launch_lock(data_dir):
+            if is_mixxx_running(data_dir):
+                log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
+                input("Press Enter to exit...")
+                sys.exit(1)
+            # Nothing is actually running, so the existing lock must be
+            # stale (left behind by a session that crashed before "save"
+            # ran). Clear it and retry once.
+            release_launch_lock(data_dir)
+            if not acquire_launch_lock(data_dir):
+                log("\n❌ ERROR: ANOTHER LAUNCH IS ALREADY IN PROGRESS!\n")
+                input("Press Enter to exit...")
+                sys.exit(1)
 
     # Cloud-Sync Protection (The Dirty Flag)
     sync_lock = os.path.join(data_dir, ".mixxx_is_active")
@@ -216,7 +300,7 @@ def fix_paths(data_dir, to_os, mode="load"):
             log(f"The database was last used on: {last_machine}")
             log("If that machine is still syncing, you may lose data!")
             log("!"*60)
-            if input("Proceed anyway? (y/N): ").lower() != 'y': sys.exit(0)
+            if input("Proceed anyway? (y/N): ").lower() != 'y': sys.exit(1)
 
     # Path Resolution
     portable_root_abs = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -238,6 +322,7 @@ def fix_paths(data_dir, to_os, mode="load"):
         handle_external_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
         if os.path.exists(sync_lock): os.remove(sync_lock)
+        release_launch_lock(data_dir)
         log(f"[SUCCESS] Session closed cleanly.", data_dir)
         return
 
@@ -252,6 +337,10 @@ def fix_paths(data_dir, to_os, mode="load"):
         backups = sorted(glob.glob(os.path.join(backup_dir, f"mixxxdb_{hostname}_*.sqlite")))
         if backups and input(f"Restore latest backup ({os.path.basename(backups[-1])})? (y/N): ").lower() == 'y':
             shutil.copy2(backups[-1], db_path)
+            if not check_db_integrity(db_path, data_dir):
+                log("❌ Restored backup also failed the integrity check. Aborting.", data_dir)
+                input("Press Enter to exit...")
+                sys.exit(1)
         else: sys.exit(1)
 
     # 2. Hardware Restore
@@ -267,8 +356,10 @@ def fix_paths(data_dir, to_os, mode="load"):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         shutil.copy2(db_path, os.path.join(backup_dir, f"mixxxdb_{hostname}_{ts}.sqlite"))
         for old in sorted(glob.glob(os.path.join(backup_dir, f"mixxxdb_{hostname}_*.sqlite")))[:-10]:
-            try: os.remove(old)
-            except: pass
+            try:
+                os.remove(old)
+            except Exception as e:
+                log(f"⚠️ Could not prune old backup {os.path.basename(old)}: {e}", data_dir)
 
     # 4. Database Migration
     if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
@@ -280,11 +371,15 @@ def fix_paths(data_dir, to_os, mode="load"):
                 cur = conn.cursor()
                 targets = [("track_locations", "location"), ("track_locations", "directory"),
                            ("LibraryHashes", "directory_path"), ("directories", "directory")]
+                # Escape SQL wildcards in old_root and require a '/' boundary after it,
+                # so a root containing '_'/'%' (e.g. "My_Drive") or a sibling directory
+                # with a similar name (e.g. "DevelopmentBackup") can't falsely match.
+                like_pattern = sql_like_escape(old_root) + "/%"
                 for table, col in targets:
                     cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
                     if cur.fetchone():
-                        cur.execute(f"UPDATE {table} SET {col} = ? || SUBSTR({col}, LENGTH(?) + 1) WHERE {col} LIKE ? || '%'", 
-                                   (current_root, old_root, old_root))
+                        cur.execute(f"UPDATE {table} SET {col} = ? || SUBSTR({col}, LENGTH(?) + 1) WHERE {col} LIKE ? ESCAPE '\\'",
+                                   (current_root, old_root, like_pattern))
                 conn.commit()
                 conn.close()
             except Exception as e: log(f"Database Error: {e}", data_dir)
@@ -307,7 +402,8 @@ def fix_paths(data_dir, to_os, mode="load"):
             elif not any(l.startswith("Directory ") for l in lines):
                 with open(cfg_active, 'a', encoding='utf-8') as f:
                     f.write(f"\n[Library]\nDirectory {current_music_dir}\nRecordingDirectory {current_music_dir}\n")
-        except: pass
+        except Exception as e:
+            log(f"⚠️ Config path update skipped: {e}", data_dir)
 
     validate_library(db_path, current_root, data_dir)
 
