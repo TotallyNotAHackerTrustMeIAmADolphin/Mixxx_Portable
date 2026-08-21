@@ -45,7 +45,7 @@ def is_mixxx_running():
 def check_db_integrity(db_path, data_dir):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return True
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         res = conn.execute("PRAGMA integrity_check").fetchone()
         conn.close()
         return res[0] == "ok"
@@ -66,7 +66,7 @@ def optimize_db(db_path, data_dir):
 def get_old_root_from_db(db_path):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return None
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='directories'")
         if not cur.fetchone(): 
@@ -85,7 +85,7 @@ def get_external_tracks(db_path, current_root):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return []
     external = []
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = sqlite3.connect(db_path, timeout=15.0)
         cur = conn.cursor()
         # Check if tables exist
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='track_locations'")
