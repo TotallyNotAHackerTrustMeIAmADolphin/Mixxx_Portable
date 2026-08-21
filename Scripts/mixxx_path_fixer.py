@@ -165,19 +165,25 @@ def handle_external_tracks(db_path, current_root, data_dir):
             except Exception as e:
                 log(f"❌ Error during import: {e}", data_dir)
 
-    # 2. Cleanup (Remove) - Re-fetch list to prevent stale data
+    # 2. Cleanup (Remove) - Re-fetch list to prevent stale data.
+    # Only offer removal for tracks NOT reachable on this PC (zombie entries
+    # from another host or genuinely deleted files). Reachable tracks the
+    # user just declined to ingest still exist on disk and must be left
+    # alone, or their Mixxx metadata (cues, ratings, play history) would be
+    # destroyed even though the file itself is fine.
     external = get_external_tracks(db_path, current_root)
-    if external:
-        log(f"\nℹ️  The following {len(external)} tracks are still external or missing:", data_dir)
-        for _, artist, title, path in external:
+    missing = [t for t in external if not os.path.exists(t[3])]
+    if missing:
+        log(f"\nℹ️  The following {len(missing)} tracks are still not present on this PC:", data_dir)
+        for _, artist, title, path in missing:
             log(f"   - {artist or 'Unknown'} - {title or 'Unknown'} ({path})", data_dir)
-            
-        choice = input(f"\nRemove these {len(external)} entries from the database? (y/N): ").lower()
+
+        choice = input(f"\nRemove these {len(missing)} entries from the database? (y/N): ").lower()
         if choice == 'y':
             try:
                 conn = sqlite3.connect(db_path, timeout=30.0)
                 cur = conn.cursor()
-                for tl_id, _, _, _ in external:
+                for tl_id, _, _, _ in missing:
                     cur.execute("DELETE FROM library WHERE location = ?", (tl_id,))
                     cur.execute("DELETE FROM track_locations WHERE id = ?", (tl_id,))
                 conn.commit()
