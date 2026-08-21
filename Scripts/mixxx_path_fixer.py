@@ -384,13 +384,18 @@ def fix_paths(data_dir, to_os, mode="load"):
     portable_root_abs = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     current_root = mixxx_normalize_path(portable_root_abs)
     current_music_dir = f"{current_root}/Music"
-    
+    # A dedicated subfolder, not the library root itself — recordings are
+    # session captures, not library tracks, and dumping them directly into
+    # Music/ would mix them in with (and get them scanned as) real tracks.
+    current_recordings_dir = f"{current_music_dir}/Recordings"
+
     db_path = os.path.join(data_dir, "mixxxdb.sqlite")
     cfg_active = os.path.join(data_dir, "mixxx.cfg")
     config_dir = os.path.join(data_dir, "Configs")
     backup_dir = os.path.join(data_dir, "Backups")
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(os.path.join(current_root, "Music", "Recordings"), exist_ok=True)
 
     log(f"--- Mixxx Sync [{to_os.upper()} | {hostname}] ---", data_dir)
 
@@ -473,7 +478,7 @@ def fix_paths(data_dir, to_os, mode="load"):
                     changed = changed or new_line != l
                     new_lines.append(new_line); has_dir = True
                 elif l.startswith("RecordingDirectory "):
-                    new_line = f"RecordingDirectory {current_music_dir}\n"
+                    new_line = f"RecordingDirectory {current_recordings_dir}\n"
                     changed = changed or new_line != l
                     new_lines.append(new_line); has_rec = True
                 else:
@@ -484,7 +489,7 @@ def fix_paths(data_dir, to_os, mode="load"):
                 changed = True
                 missing = []
                 if not has_dir: missing.append(f"Directory {current_music_dir}\n")
-                if not has_rec: missing.append(f"RecordingDirectory {current_music_dir}\n")
+                if not has_rec: missing.append(f"RecordingDirectory {current_recordings_dir}\n")
                 if library_header_idx is not None:
                     # Insert into the existing [Library] section instead of
                     # appending a second one, which would otherwise create a
