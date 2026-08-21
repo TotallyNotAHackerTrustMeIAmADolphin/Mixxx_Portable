@@ -24,9 +24,28 @@ __pycache__/
 /Mixxx_Data/mixxxdb.sqlite-shm
 
 # --- Mixxx Configs ---
-# We keep the templates (.win / .lin) but ignore the active working config
-# (The scripts will recreate it anyway)
+# The active working config is machine-specific and gets recreated by the
+# scripts on every launch, so it's never tracked.
 /Mixxx_Data/mixxx.cfg
+
+# Mixxx_Data/Configs holds per-machine hardware profiles
+# (mixxx.cfg.<hostname>), which are host-specific and never tracked.
+# Shared OS-level templates (mixxx.cfg.win / .lin / .mac) CAN be tracked
+# if present. /Mixxx_Data/* above ignores the whole Configs/ directory as
+# a unit, so it must be explicitly un-ignored before per-file exceptions
+# inside it can take effect.
+!/Mixxx_Data/Configs/
+/Mixxx_Data/Configs/*
+!/Mixxx_Data/Configs/mixxx.cfg.win
+!/Mixxx_Data/Configs/mixxx.cfg.lin
+!/Mixxx_Data/Configs/mixxx.cfg.mac
+
+# NOTE: mixxxdb.sqlite is intentionally NOT un-ignored. It's a live,
+# per-user music library (real filenames/artists/play history), and this
+# project is cloned by multiple independent users — shipping one user's
+# personal database as a tracked "seed" file would leak their data into
+# a public repo. mixxx_path_fixer.py already handles a missing database
+# by letting Mixxx create a fresh empty one on first launch.
 
 # --- Python Portable (Windows) ---
 # Normally Git ignores .exe and .dll, but we NEED these for the portable engine.
@@ -46,6 +65,3 @@ __pycache__/
 !start_smart_windows.bat
 !start_smart_macos.sh
 !/Scripts/mixxx_path_fixer.py
-!/Mixxx_Data/mixxx.cfg.win
-!/Mixxx_Data/mixxx.cfg.lin
-!/Mixxx_Data/mixxxdb.sqlite
