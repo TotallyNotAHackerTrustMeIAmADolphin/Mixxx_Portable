@@ -323,7 +323,8 @@ def fix_paths(data_dir, to_os, mode="load"):
             elif not any(l.startswith("Directory ") for l in lines):
                 with open(cfg_active, 'a', encoding='utf-8') as f:
                     f.write(f"\n[Library]\nDirectory {current_music_dir}\nRecordingDirectory {current_music_dir}\n")
-        except: pass
+        except Exception as e:
+            log(f"⚠️ Config path update skipped: {e}", data_dir)
 
     validate_library(db_path, current_root, data_dir)
 
