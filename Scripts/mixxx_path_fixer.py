@@ -216,7 +216,7 @@ def fix_paths(data_dir, to_os, mode="load"):
             log(f"The database was last used on: {last_machine}")
             log("If that machine is still syncing, you may lose data!")
             log("!"*60)
-            if input("Proceed anyway? (y/N): ").lower() != 'y': sys.exit(0)
+            if input("Proceed anyway? (y/N): ").lower() != 'y': sys.exit(1)
 
     # Path Resolution
     portable_root_abs = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
