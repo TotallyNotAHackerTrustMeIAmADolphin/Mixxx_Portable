@@ -29,9 +29,24 @@ def mixxx_normalize_path(path_str):
         path_str = path_str[0].upper() + path_str[1:]
     return path_str
 
-def sql_like_escape(s):
-    """Escapes '\\', '%' and '_' so a path can be used as a literal prefix in a SQL LIKE pattern (pair with ESCAPE '\\')."""
-    return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+def read_last_root(data_dir):
+    """Reads the portable root recorded by write_last_root() on a previous run, or None if no sidecar exists yet."""
+    path = os.path.join(data_dir, ".mixxx_last_root")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            root = f.read().strip()
+        return root or None
+    except Exception:
+        return None
+
+def write_last_root(data_dir, root):
+    """Records the current portable root, so the next run knows exactly what to substitute without guessing."""
+    path = os.path.join(data_dir, ".mixxx_last_root")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(root + "\n")
+    except Exception:
+        pass
 
 def is_mixxx_running(data_dir=None):
     try:
@@ -106,23 +121,70 @@ def optimize_db(db_path, data_dir):
         log(f"⚠️ Optimization skipped: {e}", data_dir)
 
 def get_old_root_from_db(db_path):
+    """LEGACY FALLBACK ONLY — used at most once per install, when no
+    .mixxx_last_root sidecar is found (see read_last_root()). Heuristically
+    infers the old root by scanning 'directories' rows ending in '/Music'.
+    If more than one candidate exists (e.g. a nested folder also happens to
+    be named 'Music'), the shortest/outermost candidate is preferred, since
+    a genuinely nested Music-named subfolder always produces a longer path
+    than the true library root."""
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return None
     try:
         conn = sqlite3.connect(db_path, timeout=15.0)
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='directories'")
-        if not cur.fetchone(): 
+        if not cur.fetchone():
             conn.close()
             return None
         cur.execute("SELECT directory FROM directories")
         rows = cur.fetchall()
         conn.close()
+        candidates = []
         for (path_str,) in rows:
             if not path_str: continue
             p = path_str.replace('\\', '/')
-            if p.endswith('/Music'): return p[:-6]
+            if p.endswith('/Music'): candidates.append(p[:-6])
+        if candidates:
+            return min(candidates, key=len)
     except Exception: pass
     return None
+
+def substitute_path_prefix(db_path, old_prefix, new_prefix, data_dir):
+    """Replace old_prefix with new_prefix across all path columns, anchored
+    at an exact match or a '/' boundary (never a bare substring match).
+    Pure Python row-by-row comparison — no SQL LIKE, so no wildcard-escaping
+    surface regardless of what old_prefix/new_prefix contain. Returns the
+    number of rows changed."""
+    if not old_prefix or old_prefix == new_prefix or not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
+        return 0
+    total = 0
+    boundary_prefix = old_prefix + "/"
+    targets = [("track_locations", "location"), ("track_locations", "directory"),
+               ("LibraryHashes", "directory_path"), ("directories", "directory")]
+    try:
+        conn = sqlite3.connect(db_path, timeout=15.0)
+        cur = conn.cursor()
+        for table, col in targets:
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+            if not cur.fetchone():
+                continue
+            cur.execute(f"SELECT rowid, {col} FROM {table}")
+            updates = []
+            for rowid, val in cur.fetchall():
+                if not val:
+                    continue
+                if val == old_prefix:
+                    updates.append((new_prefix, rowid))
+                elif val.startswith(boundary_prefix):
+                    updates.append((new_prefix + val[len(old_prefix):], rowid))
+            if updates:
+                cur.executemany(f"UPDATE {table} SET {col} = ? WHERE rowid = ?", updates)
+                total += len(updates)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log(f"Database Error during path substitution: {e}", data_dir)
+    return total
 
 def get_external_tracks(db_path, current_root):
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0: return []
@@ -321,6 +383,7 @@ def fix_paths(data_dir, to_os, mode="load"):
             shutil.copy2(cfg_active, os.path.join(config_dir, f"mixxx.cfg.{hostname}"))
         handle_external_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
+        write_last_root(data_dir, current_root)
         if os.path.exists(sync_lock): os.remove(sync_lock)
         release_launch_lock(data_dir)
         log(f"[SUCCESS] Session closed cleanly.", data_dir)
@@ -363,45 +426,68 @@ def fix_paths(data_dir, to_os, mode="load"):
 
     # 4. Database Migration
     if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
-        old_root = get_old_root_from_db(db_path)
+        old_root = read_last_root(data_dir)
+        if not old_root:
+            # No sidecar yet: brand-new DB, or a legacy (pre-feature) install
+            # that hasn't been through a sidecar-aware run before. One-time
+            # bootstrap only — the moment this load succeeds, the sidecar is
+            # written below and this fallback is never needed again.
+            old_root = get_old_root_from_db(db_path)
+            if old_root:
+                log(f"No path-tracking sidecar found; inferred old root from DB: {old_root}", data_dir)
+
         if old_root and old_root != current_root:
-            log(f"Migrating DB: {old_root} -> {current_root}", data_dir)
-            try:
-                conn = sqlite3.connect(db_path, timeout=15.0)
-                cur = conn.cursor()
-                targets = [("track_locations", "location"), ("track_locations", "directory"),
-                           ("LibraryHashes", "directory_path"), ("directories", "directory")]
-                # Escape SQL wildcards in old_root and require a '/' boundary after it,
-                # so a root containing '_'/'%' (e.g. "My_Drive") or a sibling directory
-                # with a similar name (e.g. "DevelopmentBackup") can't falsely match.
-                like_pattern = sql_like_escape(old_root) + "/%"
-                for table, col in targets:
-                    cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
-                    if cur.fetchone():
-                        cur.execute(f"UPDATE {table} SET {col} = ? || SUBSTR({col}, LENGTH(?) + 1) WHERE {col} LIKE ? ESCAPE '\\'",
-                                   (current_root, old_root, like_pattern))
-                conn.commit()
-                conn.close()
-            except Exception as e: log(f"Database Error: {e}", data_dir)
+            rows_changed = substitute_path_prefix(db_path, old_root, current_root, data_dir)
+            log(f"Migrating DB: {old_root} -> {current_root} ({rows_changed} path(s) updated)", data_dir)
+
+    write_last_root(data_dir, current_root)
 
     # 5. Config Migration
+    # mixxx.cfg has exactly one Directory value and one RecordingDirectory
+    # value, so unlike the DB there's nothing ambiguous to infer — just
+    # unconditionally set both to the current root. This also fixes a
+    # separate bug the old detect-then-replace approach had: it applied
+    # `l.replace(old_cfg_root, current_root) if old_cfg_root in l else l`
+    # to EVERY line in the file, so any unrelated value that happened to
+    # contain the old root as a substring got silently corrupted too.
     if os.path.exists(cfg_active):
         try:
             with open(cfg_active, 'r', encoding='utf-8', errors='ignore') as f: lines = f.readlines()
-            old_cfg_root = None
+            new_lines, has_dir, has_rec, changed = [], False, False, False
+            library_header_idx = None
             for l in lines:
-                if l.startswith("Directory ") and "/Music" in l:
-                    p_root = l.replace("\\", "/").split("Directory ")[1].split("/Music")[0].strip()
-                    if p_root != current_root:
-                        old_cfg_root = p_root
-                        break
-            if old_cfg_root:
+                if l.startswith("Directory "):
+                    new_line = f"Directory {current_music_dir}\n"
+                    changed = changed or new_line != l
+                    new_lines.append(new_line); has_dir = True
+                elif l.startswith("RecordingDirectory "):
+                    new_line = f"RecordingDirectory {current_music_dir}\n"
+                    changed = changed or new_line != l
+                    new_lines.append(new_line); has_rec = True
+                else:
+                    new_lines.append(l)
+                    if l.strip() == "[Library]":
+                        library_header_idx = len(new_lines) - 1
+            if not has_dir or not has_rec:
+                changed = True
+                missing = []
+                if not has_dir: missing.append(f"Directory {current_music_dir}\n")
+                if not has_rec: missing.append(f"RecordingDirectory {current_music_dir}\n")
+                if library_header_idx is not None:
+                    # Insert into the existing [Library] section instead of
+                    # appending a second one, which would otherwise create a
+                    # duplicate header every time exactly one key is missing.
+                    insert_at = library_header_idx + 1
+                    new_lines[insert_at:insert_at] = missing
+                else:
+                    if new_lines and not new_lines[-1].endswith("\n"):
+                        new_lines.append("\n")
+                    new_lines.append("\n[Library]\n")
+                    new_lines.extend(missing)
+            if changed:
                 with open(cfg_active, 'w', encoding='utf-8') as f:
-                    f.writelines([l.replace(old_cfg_root, current_root) if old_cfg_root in l else l for l in lines])
+                    f.writelines(new_lines)
                 log("[SUCCESS] Config paths updated.", data_dir)
-            elif not any(l.startswith("Directory ") for l in lines):
-                with open(cfg_active, 'a', encoding='utf-8') as f:
-                    f.write(f"\n[Library]\nDirectory {current_music_dir}\nRecordingDirectory {current_music_dir}\n")
         except Exception as e:
             log(f"⚠️ Config path update skipped: {e}", data_dir)
 
