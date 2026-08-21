@@ -74,25 +74,35 @@ def is_mixxx_running(data_dir=None):
         log(f"⚠️  Could not verify whether Mixxx is already running: {e}", data_dir)
         return False
 
-def acquire_launch_lock(data_dir):
-    """Atomically claims a launch lock file. Returns True if claimed, False if one already exists.
+def acquire_session_lock(data_dir, hostname):
+    """Atomically claims Mixxx_Data/.mixxx_is_active. Returns (True, None) if
+    claimed, or (False, holder_hostname) if another session already holds it.
 
-    is_mixxx_running() alone has a check-then-act race: two near-simultaneous
-    launches can both check the process list before either has actually
-    started Mixxx, and both would see "not running". os.O_CREAT|O_EXCL is an
-    atomic filesystem operation, so only one concurrent launch can win this.
+    One file, one atomic claim, serves two purposes depending on who holds
+    it: a same-hostname holder means two near-simultaneous launches raced
+    (or a crash left a stale lock behind) — verifiable locally via
+    is_mixxx_running(), so safe to auto-heal. A different-hostname holder
+    means another machine had this open last and its cloud sync might not
+    have caught up — NOT verifiable locally, so this always requires a
+    deliberate manual decision (see the load-time caller). os.O_CREAT|O_EXCL
+    is atomic, so two near-simultaneous claims can't both succeed.
     """
-    lock_path = os.path.join(data_dir, ".mixxx_launch.lock")
+    lock_path = os.path.join(data_dir, ".mixxx_is_active")
     try:
         fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         with os.fdopen(fd, "w") as f:
-            f.write(f"{socket.gethostname()} {datetime.datetime.now().isoformat()}\n")
-        return True
+            f.write(f"{hostname}\n{datetime.datetime.now().isoformat()}\n")
+        return True, None
     except FileExistsError:
-        return False
+        try:
+            with open(lock_path, "r") as f:
+                holder = f.readline().strip()
+        except Exception:
+            holder = None
+        return False, holder
 
-def release_launch_lock(data_dir):
-    lock_path = os.path.join(data_dir, ".mixxx_launch.lock")
+def release_session_lock(data_dir):
+    lock_path = os.path.join(data_dir, ".mixxx_is_active")
     if os.path.exists(lock_path):
         try: os.remove(lock_path)
         except: pass
@@ -326,55 +336,49 @@ def fix_paths(data_dir, to_os, mode="load"):
     data_dir = os.path.abspath(data_dir)
     os.makedirs(data_dir, exist_ok=True)
     
-    # Process Protection
+    # Process Protection + Cloud-Sync Protection ("The Dirty Flag")
+    #
+    # One atomic lock file (Mixxx_Data/.mixxx_is_active) serves both jobs,
+    # branching on WHO holds it — because that's what determines whether a
+    # stale lock is safe to clear automatically:
+    #   - Same hostname: either two near-simultaneous launches on this
+    #     machine raced (e.g. a double-click), or a crash left a stale lock
+    #     behind. Locally verifiable via is_mixxx_running(), so safe to
+    #     auto-heal.
+    #   - Different hostname: another machine had this open last and its
+    #     cloud sync might not have caught up yet. NOT locally verifiable —
+    #     this script has no way to know a remote machine's sync state — so
+    #     it always requires a deliberate manual decision. No keystroke
+    #     override: a one-key "proceed anyway" next to a warning is exactly
+    #     the kind of prompt people blow through on autopilot, and doing so
+    #     here can silently clobber real work (cue points, hot cues,
+    #     playlist edits).
+    hostname = socket.gethostname().lower()
+    sync_lock = os.path.join(data_dir, ".mixxx_is_active")
+
     if mode == "load":
         if is_mixxx_running(data_dir):
             log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
             input("Press Enter to exit...")
             sys.exit(1)
 
-        # Close the race between is_mixxx_running() and Mixxx actually
-        # starting: os.O_CREAT|O_EXCL is atomic, so of two near-simultaneous
-        # launches, only one can claim this lock.
-        if not acquire_launch_lock(data_dir):
-            if is_mixxx_running(data_dir):
-                log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
-                input("Press Enter to exit...")
+        claimed, holder = acquire_session_lock(data_dir, hostname)
+        if not claimed:
+            if holder == hostname:
+                if is_mixxx_running(data_dir):
+                    log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
+                    input("Press Enter to exit...")
+                    sys.exit(1)
+                release_session_lock(data_dir)
+                claimed, holder = acquire_session_lock(data_dir, hostname)
+                if not claimed:
+                    log("\n❌ ERROR: ANOTHER LAUNCH IS ALREADY IN PROGRESS!\n")
+                    input("Press Enter to exit...")
+                    sys.exit(1)
+            else:
+                log(f"⚠️  Locked by: {holder}", data_dir)
+                log(f"Delete {sync_lock} once you've confirmed it's synced, then relaunch.", data_dir)
                 sys.exit(1)
-            # Nothing is actually running, so the existing lock must be
-            # stale (left behind by a session that crashed before "save"
-            # ran). Clear it and retry once.
-            release_launch_lock(data_dir)
-            if not acquire_launch_lock(data_dir):
-                log("\n❌ ERROR: ANOTHER LAUNCH IS ALREADY IN PROGRESS!\n")
-                input("Press Enter to exit...")
-                sys.exit(1)
-
-    # Cloud-Sync Protection (The Dirty Flag)
-    sync_lock = os.path.join(data_dir, ".mixxx_is_active")
-    hostname = socket.gethostname().lower()
-
-    if mode == "load" and os.path.exists(sync_lock):
-        with open(sync_lock, "r") as f: last_machine = f.read().strip()
-        if last_machine != hostname:
-            # No "type y to proceed anyway" here on purpose: a one-keystroke
-            # override next to a wall of text is exactly the kind of prompt
-            # people blow through on autopilot, and doing so here can
-            # silently clobber real work (cue points, hot cues, playlist
-            # edits) if the other machine's cloud sync hasn't caught up yet.
-            # Deleting the lock file is a separate, deliberate action that
-            # can't happen by accident.
-            log("\n" + "!"*60, data_dir)
-            log("⚠️  CLOUD-SYNC WARNING", data_dir)
-            log(f"This portable drive was last opened on: {last_machine}", data_dir)
-            log("If that machine hasn't finished syncing to the cloud yet,", data_dir)
-            log("opening it here now could overwrite or lose recent work.", data_dir)
-            log("!"*60, data_dir)
-            log("", data_dir)
-            log(f"Refusing to continue automatically. If you've confirmed {last_machine}", data_dir)
-            log("is fully synced (no pending uploads in Dropbox/OneDrive/etc.), delete", data_dir)
-            log(f"this lock file, then run the launcher again:\n  {sync_lock}", data_dir)
-            sys.exit(1)
 
     # Path Resolution
     portable_root_abs = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -396,13 +400,9 @@ def fix_paths(data_dir, to_os, mode="load"):
         handle_external_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
         write_last_root(data_dir, current_root)
-        if os.path.exists(sync_lock): os.remove(sync_lock)
-        release_launch_lock(data_dir)
+        release_session_lock(data_dir)
         log(f"[SUCCESS] Session closed cleanly.", data_dir)
         return
-
-    # Create lock file
-    with open(sync_lock, "w") as f: f.write(hostname)
 
     # 1. Database Check
     if not os.path.exists(db_path) or os.path.getsize(db_path) == 0:
