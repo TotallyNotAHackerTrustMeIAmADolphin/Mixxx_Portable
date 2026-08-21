@@ -52,6 +52,29 @@ def is_mixxx_running(data_dir=None):
         log(f"⚠️  Could not verify whether Mixxx is already running: {e}", data_dir)
         return False
 
+def acquire_launch_lock(data_dir):
+    """Atomically claims a launch lock file. Returns True if claimed, False if one already exists.
+
+    is_mixxx_running() alone has a check-then-act race: two near-simultaneous
+    launches can both check the process list before either has actually
+    started Mixxx, and both would see "not running". os.O_CREAT|O_EXCL is an
+    atomic filesystem operation, so only one concurrent launch can win this.
+    """
+    lock_path = os.path.join(data_dir, ".mixxx_launch.lock")
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w") as f:
+            f.write(f"{socket.gethostname()} {datetime.datetime.now().isoformat()}\n")
+        return True
+    except FileExistsError:
+        return False
+
+def release_launch_lock(data_dir):
+    lock_path = os.path.join(data_dir, ".mixxx_launch.lock")
+    if os.path.exists(lock_path):
+        try: os.remove(lock_path)
+        except: pass
+
 # --- DATABASE LOGIC ---
 
 def check_db_integrity(db_path, data_dir):
@@ -235,10 +258,28 @@ def fix_paths(data_dir, to_os, mode="load"):
     os.makedirs(data_dir, exist_ok=True)
     
     # Process Protection
-    if mode == "load" and is_mixxx_running(data_dir):
-        log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
-        input("Press Enter to exit...")
-        sys.exit(1)
+    if mode == "load":
+        if is_mixxx_running(data_dir):
+            log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
+            input("Press Enter to exit...")
+            sys.exit(1)
+
+        # Close the race between is_mixxx_running() and Mixxx actually
+        # starting: os.O_CREAT|O_EXCL is atomic, so of two near-simultaneous
+        # launches, only one can claim this lock.
+        if not acquire_launch_lock(data_dir):
+            if is_mixxx_running(data_dir):
+                log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
+                input("Press Enter to exit...")
+                sys.exit(1)
+            # Nothing is actually running, so the existing lock must be
+            # stale (left behind by a session that crashed before "save"
+            # ran). Clear it and retry once.
+            release_launch_lock(data_dir)
+            if not acquire_launch_lock(data_dir):
+                log("\n❌ ERROR: ANOTHER LAUNCH IS ALREADY IN PROGRESS!\n")
+                input("Press Enter to exit...")
+                sys.exit(1)
 
     # Cloud-Sync Protection (The Dirty Flag)
     sync_lock = os.path.join(data_dir, ".mixxx_is_active")
@@ -274,6 +315,7 @@ def fix_paths(data_dir, to_os, mode="load"):
         handle_external_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
         if os.path.exists(sync_lock): os.remove(sync_lock)
+        release_launch_lock(data_dir)
         log(f"[SUCCESS] Session closed cleanly.", data_dir)
         return
 
