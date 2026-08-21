@@ -57,6 +57,8 @@ __pycache__/
 !/Scripts/python_win/*.pyd
 !/Scripts/python_win/*.zip
 !/Scripts/python_win/*.pth
+!/Scripts/python_win/*._pth
+!/Scripts/python_win/*.txt
 !/Scripts/python_win/Lib/
 
 # --- Project Files to KEEP ---
