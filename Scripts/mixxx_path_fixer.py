@@ -443,23 +443,39 @@ def fix_paths(data_dir, to_os, mode="load"):
     write_last_root(data_dir, current_root)
 
     # 5. Config Migration
+    # mixxx.cfg has exactly one Directory value and one RecordingDirectory
+    # value, so unlike the DB there's nothing ambiguous to infer — just
+    # unconditionally set both to the current root. This also fixes a
+    # separate bug the old detect-then-replace approach had: it applied
+    # `l.replace(old_cfg_root, current_root) if old_cfg_root in l else l`
+    # to EVERY line in the file, so any unrelated value that happened to
+    # contain the old root as a substring got silently corrupted too.
     if os.path.exists(cfg_active):
         try:
             with open(cfg_active, 'r', encoding='utf-8', errors='ignore') as f: lines = f.readlines()
-            old_cfg_root = None
+            new_lines, has_dir, has_rec, changed = [], False, False, False
             for l in lines:
-                if l.startswith("Directory ") and "/Music" in l:
-                    p_root = l.replace("\\", "/").split("Directory ")[1].split("/Music")[0].strip()
-                    if p_root != current_root:
-                        old_cfg_root = p_root
-                        break
-            if old_cfg_root:
+                if l.startswith("Directory "):
+                    new_line = f"Directory {current_music_dir}\n"
+                    changed = changed or new_line != l
+                    new_lines.append(new_line); has_dir = True
+                elif l.startswith("RecordingDirectory "):
+                    new_line = f"RecordingDirectory {current_music_dir}\n"
+                    changed = changed or new_line != l
+                    new_lines.append(new_line); has_rec = True
+                else:
+                    new_lines.append(l)
+            if not has_dir or not has_rec:
+                changed = True
+                if new_lines and not new_lines[-1].endswith("\n"):
+                    new_lines.append("\n")
+                new_lines.append("\n[Library]\n")
+                if not has_dir: new_lines.append(f"Directory {current_music_dir}\n")
+                if not has_rec: new_lines.append(f"RecordingDirectory {current_music_dir}\n")
+            if changed:
                 with open(cfg_active, 'w', encoding='utf-8') as f:
-                    f.writelines([l.replace(old_cfg_root, current_root) if old_cfg_root in l else l for l in lines])
+                    f.writelines(new_lines)
                 log("[SUCCESS] Config paths updated.", data_dir)
-            elif not any(l.startswith("Directory ") for l in lines):
-                with open(cfg_active, 'a', encoding='utf-8') as f:
-                    f.write(f"\n[Library]\nDirectory {current_music_dir}\nRecordingDirectory {current_music_dir}\n")
         except Exception as e:
             log(f"⚠️ Config path update skipped: {e}", data_dir)
 
