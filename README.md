@@ -32,7 +32,8 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 ├── start_smart_linux.sh      # Linux Entry Point
 ├── start_smart_macos.sh      # macOS Entry Point
 ├── Music/                # THE ANCHOR: Put ALL your audio files here
-│   └── _Imported/        # Auto-created for ingested external tracks
+│   ├── _Imported/        # Auto-created for ingested external tracks
+│   └── Recordings/       # Auto-created; where Mixxx saves session recordings
 ├── Mixxx_Data/           # Your portable settingsPath folder
 │   ├── mixxxdb.sqlite    # The ACTIVE Library Database
 │   ├── mixxx.cfg         # The ACTIVE config (swapped per session)
