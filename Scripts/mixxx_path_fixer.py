@@ -264,6 +264,10 @@ def fix_paths(data_dir, to_os, mode="load"):
         backups = sorted(glob.glob(os.path.join(backup_dir, f"mixxxdb_{hostname}_*.sqlite")))
         if backups and input(f"Restore latest backup ({os.path.basename(backups[-1])})? (y/N): ").lower() == 'y':
             shutil.copy2(backups[-1], db_path)
+            if not check_db_integrity(db_path, data_dir):
+                log("❌ Restored backup also failed the integrity check. Aborting.", data_dir)
+                input("Press Enter to exit...")
+                sys.exit(1)
         else: sys.exit(1)
 
     # 2. Hardware Restore
