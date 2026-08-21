@@ -279,8 +279,10 @@ def fix_paths(data_dir, to_os, mode="load"):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         shutil.copy2(db_path, os.path.join(backup_dir, f"mixxxdb_{hostname}_{ts}.sqlite"))
         for old in sorted(glob.glob(os.path.join(backup_dir, f"mixxxdb_{hostname}_*.sqlite")))[:-10]:
-            try: os.remove(old)
-            except: pass
+            try:
+                os.remove(old)
+            except Exception as e:
+                log(f"⚠️ Could not prune old backup {os.path.basename(old)}: {e}", data_dir)
 
     # 4. Database Migration
     if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
