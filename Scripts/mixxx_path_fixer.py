@@ -90,8 +90,10 @@ def get_external_tracks(db_path, current_root):
         cur = conn.cursor()
         # Check if tables exist
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='track_locations'")
-        if not cur.fetchone(): return []
-        
+        if not cur.fetchone():
+            conn.close()
+            return []
+
         query = """
             SELECT tl.id, l.artist, l.title, tl.location 
             FROM track_locations tl
