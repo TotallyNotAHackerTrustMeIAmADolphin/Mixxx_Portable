@@ -383,6 +383,7 @@ def fix_paths(data_dir, to_os, mode="load"):
             shutil.copy2(cfg_active, os.path.join(config_dir, f"mixxx.cfg.{hostname}"))
         handle_external_tracks(db_path, current_root, data_dir)
         optimize_db(db_path, data_dir)
+        write_last_root(data_dir, current_root)
         if os.path.exists(sync_lock): os.remove(sync_lock)
         release_launch_lock(data_dir)
         log(f"[SUCCESS] Session closed cleanly.", data_dir)
