@@ -33,16 +33,24 @@ def sql_like_escape(s):
     """Escapes '\\', '%' and '_' so a path can be used as a literal prefix in a SQL LIKE pattern (pair with ESCAPE '\\')."""
     return s.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
 
-def is_mixxx_running():
+def is_mixxx_running(data_dir=None):
     try:
         if sys.platform == "win32":
             cmd = 'tasklist /FI "IMAGENAME eq mixxx.exe" /FO CSV /NH'
             output = subprocess.check_output(cmd, shell=True).decode('utf-8', 'ignore')
             return "mixxx.exe" in output.lower()
         else:
-            result = subprocess.run(['pgrep', '-x', 'mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # -f matches the full command line (not just argv[0]), so this
+            # also catches flatpak-sandboxed launches (e.g. "flatpak run
+            # org.mixxx.Mixxx"), which -x 'mixxx' would miss entirely.
+            result = subprocess.run(['pgrep', '-f', 'mixxx'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             return result.returncode == 0
-    except: return False
+    except Exception as e:
+        # Fail open (assume not running) so a transient pgrep/tasklist error
+        # doesn't hard-block every launch, but at least leave a trace of why
+        # the process guard couldn't actually verify anything this time.
+        log(f"⚠️  Could not verify whether Mixxx is already running: {e}", data_dir)
+        return False
 
 # --- DATABASE LOGIC ---
 
@@ -227,7 +235,7 @@ def fix_paths(data_dir, to_os, mode="load"):
     os.makedirs(data_dir, exist_ok=True)
     
     # Process Protection
-    if mode == "load" and is_mixxx_running():
+    if mode == "load" and is_mixxx_running(data_dir):
         log("\n❌ ERROR: MIXXX IS ALREADY RUNNING!\n")
         input("Press Enter to exit...")
         sys.exit(1)
