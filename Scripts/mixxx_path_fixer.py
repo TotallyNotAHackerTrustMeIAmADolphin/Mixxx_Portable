@@ -357,12 +357,24 @@ def fix_paths(data_dir, to_os, mode="load"):
     if mode == "load" and os.path.exists(sync_lock):
         with open(sync_lock, "r") as f: last_machine = f.read().strip()
         if last_machine != hostname:
-            log("\n" + "!"*60)
-            log(f"⚠️  CLOUD-SYNC WARNING")
-            log(f"The database was last used on: {last_machine}")
-            log("If that machine is still syncing, you may lose data!")
-            log("!"*60)
-            if input("Proceed anyway? (y/N): ").lower() != 'y': sys.exit(1)
+            # No "type y to proceed anyway" here on purpose: a one-keystroke
+            # override next to a wall of text is exactly the kind of prompt
+            # people blow through on autopilot, and doing so here can
+            # silently clobber real work (cue points, hot cues, playlist
+            # edits) if the other machine's cloud sync hasn't caught up yet.
+            # Deleting the lock file is a separate, deliberate action that
+            # can't happen by accident.
+            log("\n" + "!"*60, data_dir)
+            log("⚠️  CLOUD-SYNC WARNING", data_dir)
+            log(f"This portable drive was last opened on: {last_machine}", data_dir)
+            log("If that machine hasn't finished syncing to the cloud yet,", data_dir)
+            log("opening it here now could overwrite or lose recent work.", data_dir)
+            log("!"*60, data_dir)
+            log("", data_dir)
+            log(f"Refusing to continue automatically. If you've confirmed {last_machine}", data_dir)
+            log("is fully synced (no pending uploads in Dropbox/OneDrive/etc.), delete", data_dir)
+            log(f"this lock file, then run the launcher again:\n  {sync_lock}", data_dir)
+            sys.exit(1)
 
     # Path Resolution
     portable_root_abs = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

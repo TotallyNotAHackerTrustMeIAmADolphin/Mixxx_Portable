@@ -16,7 +16,7 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 ## 🚀 Key Features
 
 *   **Structure-Based Detection:** Rename your portable folder to anything you like — the script locates itself on disk to determine the current root, then tracks the exact previous root via a small sidecar file (`.mixxx_last_root`), so there's never any guessing involved in the migration.
-*   **Cloud-Sync "Dirty Flag":** Detects if the database was last used on a different machine. If the other machine hasn't finished uploading to the cloud, the script warns you before you create a sync conflict.
+*   **Cloud-Sync "Dirty Flag":** Detects if the database was last used on a different machine, and refuses to open until you confirm it's safe by manually deleting the lock file — there's no "proceed anyway" keystroke to blow through by accident, since doing that can silently overwrite real work (cue points, hot cues, playlist edits) if the other machine's sync hasn't caught up yet.
 *   **External Track Protection:** Detects tracks added from outside your portable drive. It distinguishes between tracks reachable on the current PC (offers to "ingest" them) and tracks "NOT PRESENT ON THIS PC" (zombie entries from other hosts).
 *   **Performance Optimization:** Automatically triggers `VACUUM` and `PRAGMA optimize` on exit to keep library searches lightning-fast.
 *   **Smart Hardware Scrub:** On brand-new computers, the script "scrubs" only the audio hardware section of the config to prevent OS crashes.
@@ -94,7 +94,7 @@ To keep your library 100% synced, you **must** follow this rule:
 | :--- | :--- | :--- |
 | `❌ ERROR: MIXXX IS ALREADY RUNNING` | A Mixxx process is already active. | Close all Mixxx windows. |
 | `❌ ERROR: ANOTHER LAUNCH IS ALREADY IN PROGRESS` | Two launches were started at nearly the same time (e.g. a double-click), or a previous session crashed before closing cleanly. | Wait a moment and try again; if it persists after confirming Mixxx isn't actually running, delete `Mixxx_Data/.mixxx_launch.lock`. |
-| `⚠️ CLOUD-SYNC WARNING` | Database was last used on [Machine X]. | Ensure [Machine X] has finished uploading to the cloud before clicking 'y'. |
+| `⚠️ CLOUD-SYNC WARNING` | Database was last used on [Machine X]. There is no "proceed anyway" prompt — this is intentional, since a quick keystroke here can silently overwrite recent work. | Confirm [Machine X] has fully finished uploading to the cloud (no pending sync), then manually delete `Mixxx_Data/.mixxx_is_active` and re-launch. |
 | `❌ DATABASE CORRUPTION DETECTED` | The file is unreadable. | Choose 'y' to restore the latest backup. |
 | `ℹ️ NO DATABASE FOUND` | You deleted the DB or this is a fresh install. | Mixxx will create a new one on launch. |
 | `⚠️ TRACKS OUTSIDE DRIVE` | Reachable tracks found on the host PC. | Close Mixxx to trigger the Auto-Ingest prompt. |
