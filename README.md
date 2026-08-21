@@ -18,6 +18,7 @@ Mixxx traditionally stores paths as "Absolute Paths" (e.g., `C:\Users\DJ\Music\.
 *   **Structure-Based Detection:** Rename your portable folder to anything you like — the script locates itself on disk to determine the current root, then tracks the exact previous root via a small sidecar file (`.mixxx_last_root`), so there's never any guessing involved in the migration.
 *   **One Lock File, Two Jobs:** A single atomic lock (`.mixxx_is_active`) both prevents launching a second instance of Mixxx on this machine (the leading cause of portable database corruption — closes the race between two near-simultaneous launches, e.g. a double-click) *and* acts as the cloud-sync "dirty flag." If it's held by *this* machine, it's treated as safe to clear automatically (verifiable — nothing's actually running). If it's held by a *different* machine, opening it now could overwrite recent work if that machine's cloud sync hasn't caught up — the script has no way to verify that remotely, so it always refuses to open automatically. There's deliberately no "proceed anyway" keystroke: the only way past it is to manually delete the lock file after actually confirming the other machine is synced.
 *   **External Track Protection:** Detects tracks added from outside your portable drive. It distinguishes between tracks reachable on the current PC (offers to "ingest" them) and tracks "NOT PRESENT ON THIS PC" (zombie entries from other hosts).
+*   **Deleted-Track Detection:** Separately catches tracks *inside* `Music/` whose file is gone from this filesystem — deleted, or a cloud sync still catching up. Warns on launch either way, and only offers to remove the database entry (never automatic) once you close Mixxx.
 *   **Performance Optimization:** Automatically triggers `VACUUM` and `PRAGMA optimize` on exit to keep library searches lightning-fast.
 *   **Smart Hardware Scrub:** On brand-new computers, the script "scrubs" only the audio hardware section of the config to prevent OS crashes.
 *   **Session Logging:** Maintains a `launcher_log.txt` for easy debugging of path migrations.
@@ -98,6 +99,7 @@ To keep your library 100% synced, you **must** follow this rule:
 | `ℹ️ NO DATABASE FOUND` | You deleted the DB or this is a fresh install. | Mixxx will create a new one on launch. |
 | `⚠️ TRACKS OUTSIDE DRIVE` | Reachable tracks found on the host PC. | Close Mixxx to trigger the Auto-Ingest prompt. |
 | `⚠️ NOT PRESENT ON THIS PC` | Tracks from another host PC (missing here). | Close Mixxx to trigger the Cleanup prompt. |
+| `⚠️ ... tracks inside Music/ no longer exist on disk` | A track file that was inside `Music/` is gone — deleted, or cloud sync hasn't finished downloading it yet. | If genuinely deleted, close Mixxx to trigger the Cleanup prompt. If sync is still catching up, wait and re-launch instead of removing the entry. |
 
 ---
 
