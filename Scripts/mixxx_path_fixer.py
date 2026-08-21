@@ -138,32 +138,42 @@ def handle_external_tracks(db_path, current_root, data_dir):
         if choice == 'y':
             import_dir = os.path.join(current_root, "Music", "_Imported")
             os.makedirs(import_dir, exist_ok=True)
+            conn = sqlite3.connect(db_path, timeout=30.0)
+            copied = 0
             try:
-                conn = sqlite3.connect(db_path, timeout=30.0)
                 cur = conn.cursor()
                 for tl_id, artist, title, old_path in reachable:
                     filename = os.path.basename(old_path)
                     new_path = os.path.join(import_dir, filename)
-                    
-                    # Handle collisions
+
+                    # Handle collisions: keep trying suffixes until the name
+                    # is free, so 3+ colliding files can't clobber each other
+                    # (a fixed one-shot timestamp suffix could still collide
+                    # if multiple files are processed within the same second).
                     if os.path.exists(new_path):
-                        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         name, ext = os.path.splitext(filename)
-                        new_path = os.path.join(import_dir, f"{name}_{ts}{ext}")
-                    
+                        counter = 1
+                        while os.path.exists(new_path):
+                            new_path = os.path.join(import_dir, f"{name}_{counter}{ext}")
+                            counter += 1
+
                     log(f"🚚 Copying: {filename}...", data_dir)
                     shutil.copy2(old_path, new_path)
-                    
-                    # Update DB
+
+                    # Update DB and commit immediately, so a failure on a
+                    # later track can't leave an already-copied file with a
+                    # stale DB pointer still stuck on the old external path.
                     norm_new_path = mixxx_normalize_path(new_path)
                     norm_new_dir = mixxx_normalize_path(os.path.dirname(new_path))
-                    cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?", 
+                    cur.execute("UPDATE track_locations SET location = ?, directory = ? WHERE id = ?",
                                (norm_new_path, norm_new_dir, tl_id))
-                conn.commit()
-                conn.close()
-                log("✅ Ingest complete. Database updated.", data_dir)
+                    conn.commit()
+                    copied += 1
+                log(f"✅ Ingest complete. {copied}/{len(reachable)} tracks imported.", data_dir)
             except Exception as e:
-                log(f"❌ Error during import: {e}", data_dir)
+                log(f"❌ Error during import ({copied}/{len(reachable)} completed before failure): {e}", data_dir)
+            finally:
+                conn.close()
 
     # 2. Cleanup (Remove) - Re-fetch list to prevent stale data.
     # Only offer removal for tracks NOT reachable on this PC (zombie entries
