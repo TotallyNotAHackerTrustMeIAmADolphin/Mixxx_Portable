@@ -447,10 +447,13 @@ def fix_paths(data_dir, to_os, mode="load"):
     portable_root_abs = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     current_root = mixxx_normalize_path(portable_root_abs)
     current_music_dir = f"{current_root}/Music"
-    # A dedicated subfolder, not the library root itself — recordings are
-    # session captures, not library tracks, and dumping them directly into
-    # Music/ would mix them in with (and get them scanned as) real tracks.
-    current_recordings_dir = f"{current_music_dir}/Recordings"
+    # A sibling of Music/, not a subfolder of it — recordings are session
+    # captures, not library tracks. Mixxx's library scan is recursive over
+    # the single watched Music/ directory, so a Recordings/ folder nested
+    # *inside* Music/ still gets scanned and shows up as an (unanalyzed,
+    # metadata-less) library track; living outside Music/ entirely is what
+    # actually keeps them out of the scan.
+    current_recordings_dir = f"{current_root}/Recordings"
 
     db_path = os.path.join(data_dir, "mixxxdb.sqlite")
     cfg_active = os.path.join(data_dir, "mixxx.cfg")
@@ -458,7 +461,7 @@ def fix_paths(data_dir, to_os, mode="load"):
     backup_dir = os.path.join(data_dir, "Backups")
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(backup_dir, exist_ok=True)
-    os.makedirs(os.path.join(current_root, "Music", "Recordings"), exist_ok=True)
+    os.makedirs(os.path.join(current_root, "Recordings"), exist_ok=True)
 
     log(f"--- Mixxx Sync [{to_os.upper()} | {hostname}] ---", data_dir)
 
@@ -531,40 +534,78 @@ def fix_paths(data_dir, to_os, mode="load"):
     # `l.replace(old_cfg_root, current_root) if old_cfg_root in l else l`
     # to EVERY line in the file, so any unrelated value that happened to
     # contain the old root as a substring got silently corrupted too.
+    #
+    # Matching must be section-aware: Mixxx's *actual* recording-save path
+    # lives at [Recording] Directory, not [Library] RecordingDirectory (that
+    # key exists but Mixxx never reads it when saving a recording). A bare
+    # `startswith("Directory ")` check with no section tracking used to hit
+    # [Recording] Directory too — since [Library] has no Directory key of
+    # its own in current Mixxx versions, that was the ONLY line in the file
+    # starting with "Directory ", and it was getting silently overwritten to
+    # the library root, sending recordings straight into Music/ instead of
+    # Music/Recordings/.
     if os.path.exists(cfg_active):
         try:
             with open(cfg_active, 'r', encoding='utf-8', errors='ignore') as f: lines = f.readlines()
-            new_lines, has_dir, has_rec, changed = [], False, False, False
-            library_header_idx = None
+            new_lines = []
+            has_lib_dir = has_lib_rec = has_rec_dir = False
+            library_header_idx = recording_header_idx = None
+            current_section = None
+            changed = False
             for l in lines:
-                if l.startswith("Directory "):
+                stripped = l.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    current_section = stripped
+                    new_lines.append(l)
+                    if current_section == "[Library]":
+                        library_header_idx = len(new_lines) - 1
+                    elif current_section == "[Recording]":
+                        recording_header_idx = len(new_lines) - 1
+                    continue
+                if current_section == "[Library]" and l.startswith("Directory "):
                     new_line = f"Directory {current_music_dir}\n"
                     changed = changed or new_line != l
-                    new_lines.append(new_line); has_dir = True
-                elif l.startswith("RecordingDirectory "):
+                    new_lines.append(new_line); has_lib_dir = True
+                elif current_section == "[Library]" and l.startswith("RecordingDirectory "):
                     new_line = f"RecordingDirectory {current_recordings_dir}\n"
                     changed = changed or new_line != l
-                    new_lines.append(new_line); has_rec = True
+                    new_lines.append(new_line); has_lib_rec = True
+                elif current_section == "[Recording]" and l.startswith("Directory "):
+                    new_line = f"Directory {current_recordings_dir}\n"
+                    changed = changed or new_line != l
+                    new_lines.append(new_line); has_rec_dir = True
                 else:
                     new_lines.append(l)
-                    if l.strip() == "[Library]":
-                        library_header_idx = len(new_lines) - 1
-            if not has_dir or not has_rec:
+
+            if not has_lib_dir or not has_lib_rec:
                 changed = True
                 missing = []
-                if not has_dir: missing.append(f"Directory {current_music_dir}\n")
-                if not has_rec: missing.append(f"RecordingDirectory {current_recordings_dir}\n")
+                if not has_lib_dir: missing.append(f"Directory {current_music_dir}\n")
+                if not has_lib_rec: missing.append(f"RecordingDirectory {current_recordings_dir}\n")
                 if library_header_idx is not None:
                     # Insert into the existing [Library] section instead of
                     # appending a second one, which would otherwise create a
                     # duplicate header every time exactly one key is missing.
                     insert_at = library_header_idx + 1
                     new_lines[insert_at:insert_at] = missing
+                    if recording_header_idx is not None and recording_header_idx >= insert_at:
+                        recording_header_idx += len(missing)
                 else:
                     if new_lines and not new_lines[-1].endswith("\n"):
                         new_lines.append("\n")
                     new_lines.append("\n[Library]\n")
                     new_lines.extend(missing)
+
+            if not has_rec_dir:
+                changed = True
+                if recording_header_idx is not None:
+                    new_lines.insert(recording_header_idx + 1, f"Directory {current_recordings_dir}\n")
+                else:
+                    if new_lines and not new_lines[-1].endswith("\n"):
+                        new_lines.append("\n")
+                    new_lines.append("\n[Recording]\n")
+                    new_lines.append(f"Directory {current_recordings_dir}\n")
+
             if changed:
                 with open(cfg_active, 'w', encoding='utf-8') as f:
                     f.writelines(new_lines)

@@ -11,6 +11,14 @@ __pycache__/
 /Music/*
 !/Music/.gitkeep
 
+# --- Recordings ---
+# Sibling of Music/, not a subfolder of it — kept out of Mixxx's (recursive)
+# library scan of Music/. Same treatment as Music/: /Recordings/* here keeps
+# new files ignored, and Recordings/.gitignore (tracked, since a tracked file
+# is never hidden by .gitignore rules) is what actually keeps the empty
+# folder present in git.
+/Recordings/*
+
 # --- Mixxx Generated / Temporary Files ---
 /Mixxx_Data/*
 /Mixxx_Data/logs/
