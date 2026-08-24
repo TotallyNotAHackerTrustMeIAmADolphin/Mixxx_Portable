@@ -89,19 +89,6 @@ To keep your library 100% synced, you **must** follow this rule:
 
 ---
 
-## 🗄️ Large / Network (NAS) Libraries
-
-You don't have to physically copy a huge library onto the portable drive or cloud-sync folder. The script never reads or walks `Music/` itself — it only ever writes the *string* `<portable_root>/Music` into the database and `mixxx.cfg`. That means `Music/` can be a symlink (macOS/Linux) or NTFS junction (Windows, via `mklink /J`, since plain symlinks need elevated privileges) pointing at a network mount (SMB/NFS from a NAS, e.g. Plex's media store) instead of a real folder full of files.
-
-**How to set it up:**
-1. On each machine, mount your NAS share however that OS normally does it (SMB mount, `fstab` entry, mapped drive, etc.).
-2. Replace `Music/` at the portable root with a symlink/junction to that mount point. The target path can be different on every machine — only the `Music/` name at the portable root has to line up, since that's the only part the script and Mixxx's config ever reference.
-3. Sync only `Mixxx_Data/` between machines (it's just the sqlite database, configs, and small backups — not your audio). Dropbox/OneDrive work as before; a manual tool like `rsync` or Syncthing works too, as long as you run it *after* closing Mixxx (the `save` step) and *before* the next `load` on another machine. If you forget, the cross-machine lock file (`.mixxx_is_active`) still stops you from opening an unsynced copy.
-
-**What this doesn't solve:** exporting a single playlist/crate plus a matching mini-database for offline/gig use on a machine with no access to the rest of your library. Mixxx's own "Export Tracks" only copies audio files — it doesn't emit a database alongside them — and this wrapper manages one whole-library database, so there's no subset-export path here. That gap lives in Mixxx itself, not in this script.
-
----
-
 ## 🔍 Troubleshooting
 
 | Message | Meaning | Fix |
